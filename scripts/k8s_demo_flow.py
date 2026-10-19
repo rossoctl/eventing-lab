@@ -182,6 +182,44 @@ COLD_PROMPT = ("Once more: what was the codeword? Reply with just the codeword. 
 CODEWORD = "FLOW-7321"
 
 
+def install_default_credential(token: str | None) -> bool:
+    """Make every request this script sends carry `Authorization: Bearer <token>`.
+
+    Installed as a urllib opener rather than threaded through ~19 call sites, because
+    the stages reach the API in three different shapes — `get_json`, bare
+    `urlopen(url)` and bare `urlopen(Request)` — and a header added to only some of
+    them is the bug this fixes in a quieter form.
+
+    **Why this is needed at all.** On an auth-enabled overlay EventBridge refuses an
+    unauthenticated `POST /v0/agents` with 401, which is the control working. But the
+    ordinary stages are not the identity beat: they are about scaling, signing and
+    causation, and they have to get *through* the front door to exercise any of it.
+    Before this, the whole flow stopped at stage 1 against `kind-signed-device` —
+    found on a cluster on 2026-10-19, after the overlay was added without the stages
+    being taught to sign in.
+
+    `assert_identity_gate` deliberately bypasses this: it builds its own headers so it
+    can send no credential, a bad one, then a good one. A default applied there would
+    make its first two assertions untestable.
+
+    Returns True when a credential was installed, so callers can say so.
+    """
+    token = (token or "").strip()
+    if not token:
+        return False
+
+    class _Auth(urllib.request.BaseHandler):
+        # Runs before the request goes out, for every opener-routed call.
+        def http_request(self, req):
+            if not req.has_header("Authorization"):
+                req.add_header("Authorization", f"Bearer {token}")
+            return req
+        https_request = http_request
+
+    urllib.request.install_opener(urllib.request.build_opener(_Auth()))
+    return True
+
+
 def get_json(url, *, timeout=10.0, method="GET", body=None, headers=None):
     req = urllib.request.Request(url, data=body, method=method)
     if body is not None:
@@ -191,6 +229,14 @@ def get_json(url, *, timeout=10.0, method="GET", body=None, headers=None):
     with urllib.request.urlopen(req, timeout=timeout) as r:
         raw = r.read()
         return r.status, (json.loads(raw) if raw else None)
+
+
+# An opener with none of our handlers, used by `post_expecting_refusal` so the
+# identity beat can genuinely send NO credential. `install_default_credential`
+# installs a global opener, and a default Authorization header reaching that stage's
+# first two requests would make "refused without a credential" and "refused with a bad
+# one" unassertable — the beat would be narrating a control it had stopped exercising.
+_BARE_OPENER = urllib.request.build_opener()
 
 
 def post_expecting_refusal(url, *, body=None, headers=None, timeout=10.0):
@@ -212,7 +258,9 @@ def post_expecting_refusal(url, *, body=None, headers=None, timeout=10.0):
     for name, value in (headers or {}).items():
         req.add_header(name, value)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        # `_BARE_OPENER`, not `urlopen`: see the comment above it. The identity beat's
+        # first two requests must carry exactly the credential this call was given.
+        with _BARE_OPENER.open(req, timeout=timeout) as r:
             raw = r.read()
             return r.status, r.headers, (json.loads(raw) if raw else None)
     except urllib.error.HTTPError as e:
@@ -1471,6 +1519,18 @@ def main(argv=None) -> int:
     c.log(f"context={k.current_context()} namespace={args.namespace} "
           f"overlay={args.overlay} "
           f"({'mock — free and deterministic' if f.mock else 'REAL claude, costs tokens'})")
+
+    # Sign in for the ORDINARY stages, before any of them run. On an auth-enabled
+    # overlay EventBridge refuses an unauthenticated POST with 401 — correctly — and
+    # the scaling, signing and causation beats all have to get through the front door
+    # to exercise anything. `assert_identity_gate` is unaffected: it builds its own
+    # headers so it can still send none, a bad one, then a good one.
+    if install_default_credential(os.environ.get("DEMO_GH_TOKEN")):
+        c.log("DEMO_GH_TOKEN found — requests carry Authorization: Bearer <token>")
+    elif args.gh_login:
+        c.log("NOTE: --gh-login given but DEMO_GH_TOKEN is not set. On an "
+              "auth-enabled overlay every stage will be refused 401. Run: "
+              "eval \"$(python3 scripts/login.py --client-id <id> --export)\"")
 
     f.stage0()
     if not f.base:

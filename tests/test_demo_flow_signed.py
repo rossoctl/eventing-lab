@@ -596,3 +596,114 @@ def test_the_device_overlay_is_accepted_and_runs_the_signed_beats():
     for script in ("k8s_deploy.py", "k8s_preflight.py"):
         src = (REPO / "scripts" / script).read_text()
         assert "kind-signed-device" in src, f"{script} does not accept the overlay"
+
+
+# ---- the ordinary stages must sign in too (found on a cluster, 2026-10-19) --
+#
+# `kind-signed-device` was added with an auth-enabled overlay and the stages were
+# never taught to send a credential, so the flow stopped dead at stage 1:
+#
+#     [flow] FAIL POST /v0/agents accepted
+#     [flow]      HTTP Error 401: Unauthorized
+#
+# The 401 was the control working. But the scaling, signing and causation beats are
+# not the identity beat — they have to get THROUGH the front door to exercise
+# anything. Only `assert_identity_gate` had been given headers.
+
+def _auth_server():
+    """A server that records the Authorization header of every request."""
+    import http.server
+    import threading
+    seen: list[tuple[str, str | None]] = []
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def _answer(self, kind):
+            seen.append((kind, self.headers.get("Authorization")))
+            self.send_response(202 if kind == "POST" else 200)
+            payload = b'{"correlationid":"c1"}'
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def do_POST(self):
+            self._answer("POST")
+
+        def do_GET(self):
+            self._answer("GET")
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}", seen
+
+
+def _reset_opener():
+    import urllib.request
+    urllib.request.install_opener(urllib.request.build_opener())
+
+
+def test_the_default_credential_reaches_both_http_call_shapes():
+    """The stages reach the API as `get_json` AND as bare `urlopen`, so a header
+    threaded through only one of them is the same bug in a quieter form."""
+    import urllib.request
+    srv, base, seen = _auth_server()
+    try:
+        assert flow.install_default_credential("tok123") is True
+        flow.get_json(f"{base}/v0/agents", method="POST", body=b"{}")
+        urllib.request.urlopen(f"{base}/x").read()
+        assert [a for _k, a in seen] == ["Bearer tok123", "Bearer tok123"]
+    finally:
+        _reset_opener()
+        srv.shutdown()
+
+
+def test_the_identity_gate_still_sends_no_credential():
+    """The assertion that makes the beat worth having. If the installed default
+    reached `post_expecting_refusal`, "refused without a credential" and "refused with
+    a bad one" would both become unassertable — narrating a control it stopped
+    exercising."""
+    srv, base, seen = _auth_server()
+    try:
+        flow.install_default_credential("tok123")
+        flow.post_expecting_refusal(f"{base}/v0/agents", body=b"{}")
+        assert seen[-1][1] is None, \
+            f"the identity beat must send no credential, got {seen[-1][1]!r}"
+        flow.post_expecting_refusal(f"{base}/v0/agents", body=b"{}",
+                                    headers={"Authorization": "Bearer explicit"})
+        assert seen[-1][1] == "Bearer explicit", "an explicit header must still win"
+    finally:
+        _reset_opener()
+        srv.shutdown()
+
+
+def test_installing_no_credential_is_a_no_op():
+    """Absent or blank `DEMO_GH_TOKEN` must leave requests unauthenticated rather
+    than sending `Bearer ` — on an unsigned overlay there is nothing to send."""
+    for value in (None, "", "   "):
+        assert flow.install_default_credential(value) is False
+
+
+def test_an_existing_authorization_header_is_never_overwritten():
+    """The handler adds a default; it does not impose one. A caller that set its own
+    credential meant it."""
+    srv, base, seen = _auth_server()
+    try:
+        flow.install_default_credential("tok123")
+        flow.get_json(f"{base}/x", headers={"Authorization": "Bearer mine"})
+        assert seen[-1][1] == "Bearer mine"
+    finally:
+        _reset_opener()
+        srv.shutdown()
+
+
+def test_main_installs_the_credential_before_any_stage_runs():
+    """Order matters: stage 0 reads the cluster but stage 1 POSTs, so installing
+    after `f.stage0()` would still 401. Guard against a future reorder."""
+    src = _flow_src()
+    install = _call_lines(src, "install_default_credential")
+    stage0 = _call_lines(src, "f.stage0")
+    assert install and stage0, (install, stage0)
+    assert min(install) < min(stage0), \
+        "the credential must be installed before the first stage"
