@@ -547,3 +547,118 @@ def test_the_key_material_guard_does_not_fire_for_an_unsigned_overlay(monkeypatc
     except SystemExit as e:
         assert e.code in (0, None), (
             "the unsigned overlay must not die on the key-material guard")
+
+
+# ---- a locally loaded image is not in any registry (found on a cluster) -----
+#
+# Checks 4 and 14 both demanded HTTP 200 from an anonymous manifest GET, which made
+# them unreachable for the documented local-image path: an image built with
+# `build_images.py --local` and `kind load`ed is ON THE NODE and in NO registry, so the
+# registry answers 404 by design. Found on 2026-10-19 by running preflight against a
+# `:local2` build that was sitting on the node — both checks hard-failed with
+# "make the repository public again", which is the wrong remedy for an image that was
+# never meant to be in a registry.
+#
+# Same shape as what these checks exist to catch: an assertion about an intent (is it
+# in the registry?) standing in for the state that matters (can the node run it?).
+
+
+class _NodeImageKubectl(_FakeKubectl):
+    """A cluster whose node already holds the refs it is given."""
+
+    def __init__(self, present=()):
+        super().__init__()
+        self._present = set(present)
+        self.pods_created: list[str] = []
+
+    def node_images(self):
+        return set(self._present)
+
+    def node_architectures(self):
+        return {"arm64"}
+
+    def items(self, kind, **kw):
+        return []
+
+    def delete(self, *a, **kw):
+        return None
+
+
+def test_node_images_reads_every_name_the_kubelet_reports():
+    """`status.images[].names` is the only place a locally loaded image appears: it is
+    on the node and in no registry. This is also what the kubelet itself consults."""
+    from k8slib import Kubectl
+
+    class K(Kubectl):
+        def __init__(self):
+            pass
+
+        def items(self, kind, **kw):
+            assert kind == "nodes"
+            return [{"status": {"images": [
+                {"names": ["quay.io/x/a:local2", "quay.io/x/a@sha256:deadbeef"]},
+                {"names": ["quay.io/x/b:dev"]},
+                {},                       # a node entry with no names at all
+            ]}}]
+
+    names = K().node_images()
+    assert "quay.io/x/a:local2" in names
+    assert "quay.io/x/b:dev" in names
+    assert "quay.io/x/a@sha256:deadbeef" in names
+
+
+def test_the_signing_probe_accepts_an_image_present_on_the_node(monkeypatch):
+    """The bug. A `kind load`ed image must reach the probe rather than being rejected
+    as un-pullable — and the registry must not even be consulted for it, because the
+    answer would be a misleading 404."""
+    import k8s_preflight as PF
+
+    monkeypatch.setattr(PF, "registry_manifest",
+                        lambda ref, **kw: (404, None, "not found"))
+
+    ref = "quay.io/aslomnet/rossoctl-eventrunner:local2"
+    k = _NodeImageKubectl(present={ref})
+    c = Checks(prefix="test")
+    pf = PF.Preflight(k, c, _Args("kind-signed"))
+    # Stop before the pod: the thing under test is the gate, not the probe.
+    monkeypatch.setattr(pf.k, "apply_stdin",
+                        lambda *a, **kw: Result(argv=["kubectl"], rc=1, out="", err="",
+                                                duration_s=0.0, launched=False,
+                                                timed_out=False))
+    pf._probe_signing_code("eventrunner", ref, "eventrunner.__main__")
+    assert not any("pullable" in f for f in c.failures), \
+        f"a node-local image must pass the gate, got {c.failures}"
+
+
+def test_the_signing_probe_still_fails_an_image_that_is_nowhere(monkeypatch):
+    """The fix must not become 'skip the check'. An image neither on the node nor in a
+    registry is a real failure, and the message has to name both remedies."""
+    import k8s_preflight as PF
+    monkeypatch.setattr(PF, "registry_manifest",
+                        lambda ref, **kw: (404, None, "not found"))
+    c = Checks(prefix="test")
+    pf = PF.Preflight(_NodeImageKubectl(present=set()), c, _Args("kind-signed"))
+    pf._probe_signing_code("eventrunner", "quay.io/x/missing:local9",
+                           "eventrunner.__main__")
+    assert c.failed == 1, "a nowhere-image must fail"
+    joined = " ".join(c.failures)
+    assert "pullable or present on a node" in joined
+
+
+def test_check_4_accepts_a_node_local_image_without_asking_the_registry(monkeypatch):
+    """Check 4 had the same defect, and fixing only check 14 would leave the deploy
+    blocked one check earlier — with "make the repository public again" as the advice
+    for an image that was never meant to be in a registry."""
+    import k8s_preflight as PF
+    monkeypatch.setattr(PF, "registry_manifest",
+                        lambda ref, **kw: (404, None, "nf"))
+    c = Checks(prefix="test")
+    args = _Args("kind-signed")
+    # The refs check 4 builds come from `Images(registry, tag)`, so the node has to
+    # hold exactly those — matching on a tag the args do not use would pass this test
+    # against code that still asked the registry.
+    pf = PF.Preflight(_NodeImageKubectl(), c, args)
+    imgs = set(PF.Images(args.registry, args.tag).all())
+    pf.k._present = imgs
+    pf.check_images()
+    assert c.failed == 0, f"node-local images must pass check 4, got {c.failures}"
