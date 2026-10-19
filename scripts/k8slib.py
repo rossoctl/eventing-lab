@@ -270,6 +270,18 @@ class Kubectl:
             args.append("--dry-run=server")
         return self.call(args, namespace=namespace, stdin=manifest, timeout=120)
 
+    def patch(self, target: str, body: str, *,
+              namespace: str | None | bool = None,
+              patch_type: str = "strategic") -> "Result":
+        """`kubectl patch <target> -p <body>`. Body on the command line, not stdin.
+
+        `kubectl patch` has no `-f -` form for the patch itself, so the body does go
+        into argv — fine here, because every caller passes a manifest fragment and
+        never a credential. Anything secret belongs in `apply_stdin`.
+        """
+        return self.call(["patch", target, "--type", patch_type, "-p", body],
+                         namespace=namespace)
+
     def kustomize(self, path: str) -> str:
         """Rendered overlay YAML. The input to the §14.1 manifest digest.
 

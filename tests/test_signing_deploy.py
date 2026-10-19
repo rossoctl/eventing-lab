@@ -331,6 +331,7 @@ def test_force_still_rotates_every_key(tmp_path):
 # the wiring, neither of which needs a cluster. The probe pod itself does — see the
 # PR, and eventing-lab#14.
 
+import re  # noqa: E402
 import shutil  # noqa: E402
 import subprocess  # noqa: E402
 
@@ -662,3 +663,87 @@ def test_check_4_accepts_a_node_local_image_without_asking_the_registry(monkeypa
     pf.k._present = imgs
     pf.check_images()
     assert c.failed == 0, f"node-local images must pass check 4, got {c.failures}"
+
+
+# ---- --tag was accepted and ignored (found on a cluster, 2026-10-19) --------
+#
+# `--tag` was declared in `build_args` and referenced NOWHERE else in k8s_deploy.py:
+# one mention in the whole file. So `--overlay kind-signed-device --tag local2`
+# applied the base's `:dev` to both Deployments and ran whatever `:dev` happened to
+# be -- five-day-old code whose `Cfg` had no `verify_keyset_path`, so EventBridge
+# loaded no keyset and printed no signing banner.
+#
+# 51 of 52 deploy checks passed. Preflight check 14 passed too, having probed the
+# right IMAGE while the pod ran a different one. The only check that was right was
+# `_verify_keyset_enforcing`, which reads the process rather than the manifest.
+#
+# It also made a documented procedure wrong: the demo script and the 2026-10-14
+# report both say to pass `--tag local1` to avoid the `:dev` reset, and passing it
+# never did that.
+
+
+def _deploy_src() -> str:
+    return (REPO / "scripts" / "k8s_deploy.py").read_text()
+
+
+def _call_lines(src: str, name: str) -> list[int]:
+    """Line numbers where `name` is CALLED — not defined, not named in a comment.
+
+    Same helper and same reason as `tests/test_dockerfile_packaging.py`: an earlier
+    guard there passed against code with the call deleted, because a comment
+    mentioning the function and its own `def` both matched a raw text search.
+    """
+    out = []
+    for n, line in enumerate(src.splitlines(), 1):
+        code = line.split("#", 1)[0]
+        if re.search(rf"(?<!def ){re.escape(name)}\s*\(", code):
+            out.append(n)
+    return out
+
+
+def test_the_deploy_applies_the_tag_to_both_deployments():
+    """The bug: a flag that is parsed and never used is worse than no flag."""
+    src = _deploy_src()
+    called = _call_lines(src, "self._apply_image_tag")
+    assert called, "_apply_image_tag is never called"
+    applies = _call_lines(src, "apply_kustomize")
+    assert applies and any(c > min(applies) for c in called), (
+        "the tag must be applied AFTER apply_kustomize — the overlay sets `:dev`, "
+        "so patching before it would be overwritten")
+
+
+def test_the_tag_patch_sets_both_services_and_relaxes_the_pull_policy():
+    """`imagePullPolicy: Always` with a locally built tag means the kubelet goes to
+    the registry, 404s, and keeps the container already running — the stale-image
+    failure in its quietest form."""
+    src = _deploy_src()
+    body = src[src.index("def _apply_image_tag"):]
+    body = body[:body.index("\n    def ", 1)]
+    for svc in ("eventbridge", "eventrunner"):
+        assert svc in body, f"{svc} is not patched"
+    assert "IfNotPresent" in body
+    assert "DEFAULT_TAG" in body, \
+        "a :dev deploy from a registry should keep pulling — the relax must be " \
+        "conditional on a non-default tag"
+
+
+def test_the_default_tag_keeps_the_registry_pull_policy():
+    """Only a NON-default tag relaxes the policy. Relaxing it for `:dev` too would
+    make a registry deploy silently prefer a stale local layer."""
+    import k8s_deploy as D
+    src = _deploy_src()
+    body = src[src.index("def _apply_image_tag"):]
+    body = body[:body.index("\n    def ", 1)]
+    assert "default = tag == DEFAULT_TAG" in body
+    assert D.DEFAULT_TAG, "DEFAULT_TAG must be a real value to compare against"
+
+
+def test_kubectl_patch_exists_and_does_not_take_a_credential():
+    """`kubectl patch` has no `-f -` form for the patch body, so it goes into argv.
+    That is fine for manifest fragments and not for secrets — anything secret has to
+    keep using `apply_stdin`, which is why this is documented on the method."""
+    from k8slib import Kubectl
+    assert hasattr(Kubectl, "patch")
+    doc = Kubectl.patch.__doc__ or ""
+    assert "apply_stdin" in doc, \
+        "the docstring must point secrets at apply_stdin"
