@@ -218,24 +218,23 @@ class Preflight:
         want = {f"linux/{a}" for a in self.node_arches}
         refs = self.images.all(with_claude=(self.args.overlay == "demo"))
         for ref in refs:
-            # A locally built image that was `kind load`ed is on the node and in no
+            # A locally built image that was `kind load`ed is on the node and in NO
             # registry, so an anonymous manifest GET is a 404 BY DESIGN. Demanding a
-            # 200 unconditionally fails the documented local-image path (the demo
-            # script's own `--tag` procedure) and says "make the repository public",
-            # which is the wrong remedy and sends the reader to Quay for an image that
-            # was never meant to be there. The arch check below is skipped too: there
-            # is no manifest list to read, and the image is already running on this
-            # node's architecture by virtue of being on it.
-            status, body, err = registry_manifest(ref)
-            if status != 200 and ref in self._node_images():
-                # On the node and in no registry: `kind load`ed. The arch check below
-                # is skipped with it — there is no manifest list to read, and an image
-                # already on this node runs on this node's architecture.
-                self.c.ok(f"{ref} is present on a node (loaded locally)")
+            # 200 unconditionally failed the documented local-image path (the demo
+            # script's own `--tag` procedure) and advised "make the repository public",
+            # which sends the reader to Quay for an image that was never meant to be
+            # there. The arch assertion is skipped along with it: there is no manifest
+            # list to read, and an image already on this node runs on this node's
+            # architecture by virtue of being there. The predicate itself — registry
+            # first, node as fallback — is `_pullable_or_on_node`, shared with the
+            # signing probe so the rule cannot drift between the two.
+            ok, from_registry, body, why = self._pullable_or_on_node(ref)
+            if ok and not from_registry:
+                self.c.ok(f"{ref} is {why}")
                 continue
-            if not self.c.expect(status == 200,
+            if not self.c.expect(ok,
                                  f"{ref} is anonymously pullable (HTTP 200)",
-                                 f"status={status} {err}\n"
+                                 f"{why}\n"
                                  f"  Make the repository public again; there is no "
                                  f"pull-secret fallback by design.\n"
                                  f"  For a locally built image, load it onto the node: "
@@ -662,7 +661,32 @@ class Preflight:
         finally:
             self.k.delete("pod", name, namespace=self.ns)
 
-    # ---- 14 -------------------------------------------------------------
+    # ---- shared by 4 and 14 ---------------------------------------------
+    def _pullable_or_on_node(self, ref: str) -> tuple[bool, bool, dict | None, str]:
+        """`(ok, from_registry, body, why)` — can the kubelet get this image at all?
+
+        One predicate for the two checks that ask it. Check 4 and the signing probe
+        had the same `status != 200 and ref in self._node_images()` test written out
+        twice with different reporting, and the PR's own history is that fixing one
+        and not the other left the deploy blocked a check earlier. Shared, so the next
+        change to the rule lands in both by construction.
+
+        Registry FIRST, node only as the fallback. Asking the node unconditionally
+        would make a pullability question need a reachable cluster to answer something
+        the registry can answer alone, and would break every caller that drives this
+        with a fake Kubectl.
+
+        `from_registry` is what check 4 needs on top of the verdict: an image on the
+        node has no manifest list to read, so the arch assertion has to be skipped
+        with it rather than run against an empty body.
+        """
+        status, body, err = registry_manifest(ref)
+        if status == 200:
+            return True, True, body, ""
+        if ref in self._node_images():
+            return True, False, None, "present on a node (loaded locally)"
+        return False, False, None, f"status={status} {err}"
+
     def _node_images(self) -> set[str]:
         """Images the kubelets report, cached, and empty rather than raising.
 
@@ -709,6 +733,7 @@ class Preflight:
             for svc, (key, _mod) in ENFORCEMENT_KEYS.items()
         }
 
+    # ---- 14 -------------------------------------------------------------
     def check_signing_code_present(self) -> None:
         """Check 4 proves an image can be PULLED. This proves it can do the thing the
         overlay is about to enforce.
@@ -763,15 +788,13 @@ class Preflight:
         # hard-failed a `:local2` build that was sitting on the node, which is the same
         # "verified an intent, not a state" shape as the bugs this check exists to
         # catch. The node is also the authority the kubelet itself consults.
-        # Registry FIRST, node only as the fallback. Asking the node unconditionally
-        # would make this check need a reachable cluster to answer a question the
-        # registry can answer on its own, and would break every caller that drives it
-        # with a fake Kubectl.
-        status, _body, err = registry_manifest(ref)
-        if status != 200 and ref not in self._node_images():
+        # The predicate is shared with check 4 — see `_pullable_or_on_node` for the
+        # registry-first ordering and why the node is only the fallback.
+        ok, _from_registry, _body, why = self._pullable_or_on_node(ref)
+        if not ok:
             self.c.fail(
                 f"{ref} is pullable or present on a node",
-                f"not on any node, and the registry says status={status} {err}\n"
+                f"not on any node, and the registry says {why}\n"
                 f"  Build and push it:  python3 scripts/build_images.py\n"
                 f"  Or build locally:   python3 scripts/build_images.py --local "
                 f"--tag {self.args.tag} && kind load docker-image {ref} "
