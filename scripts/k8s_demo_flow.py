@@ -54,6 +54,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -182,8 +183,27 @@ COLD_PROMPT = ("Once more: what was the codeword? Reply with just the codeword. 
 CODEWORD = "FLOW-7321"
 
 
+# Hosts the default Authorization header may be sent to, populated by
+# `credential_host` once the base URL is known. Empty until then, which is why the
+# handler sends nothing before `stage0()` resolves the Route or `--public-url`.
+_CREDENTIALLED_HOSTS: set[str] = set()
+
+
+def credential_host(base: str) -> None:
+    """Allow the default Authorization header for this base URL's host.
+
+    `req.host` includes the port, so `127.0.0.1:18080` and `127.0.0.1:30080` are
+    distinct entries — correct here, where a port-forward and a NodePort are different
+    endpoints that happen to share a hostname.
+    """
+    host = urllib.parse.urlsplit(base).netloc
+    if host:
+        _CREDENTIALLED_HOSTS.add(host)
+
+
 def install_default_credential(token: str | None) -> bool:
-    """Make every request this script sends carry `Authorization: Bearer <token>`.
+    """Make every request this script sends to the EventBridge base carry
+    `Authorization: Bearer <token>`.
 
     Installed as a urllib opener rather than threaded through ~19 call sites, because
     the stages reach the API in three different shapes — `get_json`, bare
@@ -208,11 +228,32 @@ def install_default_credential(token: str | None) -> bool:
     if not token:
         return False
 
+    bearer = f"Bearer {token}"
+
     class _Auth(urllib.request.BaseHandler):
-        # Runs before the request goes out, for every opener-routed call.
+        # Runs before the request goes out, for every opener-routed call — including
+        # each hop of a redirect chain, which is what makes the strip below reachable.
         def http_request(self, req):
-            if not req.has_header("Authorization"):
-                req.add_header("Authorization", f"Bearer {token}")
+            # Host-scoped on purpose. This is a GLOBAL opener, and urllib's
+            # HTTPRedirectHandler copies every header but content-length/content-type
+            # onto the redirect target — ACROSS ORIGINS, with no same-host rule. So an
+            # unconditional header would hand a live GitHub token to whatever a 302
+            # from an operator-supplied `--public-url` points at, and the flow does
+            # follow redirects (`/v0/groups/{gid}`, `/v0/agents/{corr}/transcript`).
+            # The token is unscoped, which bounds the damage; that is a reason not to
+            # mind a leak, not a reason to permit one.
+            if req.host in _CREDENTIALLED_HOSTS:
+                if not req.has_header("Authorization"):
+                    req.add_header("Authorization", bearer)
+                return req
+            # ADDING the header only on the right host is not enough, which a test
+            # caught rather than a reading: by the time the redirect is followed the
+            # header is ALREADY on the copied Request, so a guard that merely declines
+            # to add one leaves the first hop's credential in place and the token goes
+            # off-host anyway. Only OUR header is removed — an explicit one a caller
+            # set for that host is theirs to send.
+            if req.get_header("Authorization") == bearer:
+                req.remove_header("Authorization")
             return req
         https_request = http_request
 
@@ -394,6 +435,10 @@ class Flow:
         self.base = self.args.public_url or pf.route_url()
         if not self.c.expect(bool(self.base), f"public URL: {self.base or '(none)'}"):
             return
+        # The installed default credential is host-scoped and this is where the host
+        # becomes known, so registration belongs here rather than at install time —
+        # which runs before any of this is resolved. See `install_default_credential`.
+        credential_host(self.base)
         self.c.expect(self.k.ready_replicas("eventbridge", namespace=self.ns) >= 1,
                       "EventBridge is up — it stays at 1 replica BY DESIGN (§8.6); "
                       "it is the agent that scales to zero")

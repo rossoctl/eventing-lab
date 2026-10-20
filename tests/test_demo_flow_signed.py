@@ -18,6 +18,7 @@ import json
 import sys
 
 import k8s_demo_flow as flow
+import pytest
 
 from shared import ce, keyset
 from shared import signing as S
@@ -642,6 +643,20 @@ def _auth_server():
 def _reset_opener():
     import urllib.request
     urllib.request.install_opener(urllib.request.build_opener())
+    flow._CREDENTIALLED_HOSTS.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_leaked_opener():
+    """`install_opener` and the host set are PROCESS-GLOBAL state.
+
+    The tests below were correct in file order with a `finally`, but that made
+    isolation a convention: one future test that forgets it leaks a credentialled
+    opener into every later test in the session, and the failure would surface
+    somewhere else entirely. A fixture makes it structural.
+    """
+    yield
+    _reset_opener()
 
 
 def test_the_default_credential_reaches_both_http_call_shapes():
@@ -651,11 +666,81 @@ def test_the_default_credential_reaches_both_http_call_shapes():
     srv, base, seen = _auth_server()
     try:
         assert flow.install_default_credential("tok123") is True
+        flow.credential_host(base)
         flow.get_json(f"{base}/v0/agents", method="POST", body=b"{}")
         urllib.request.urlopen(f"{base}/x").read()
         assert [a for _k, a in seen] == ["Bearer tok123", "Bearer tok123"]
     finally:
-        _reset_opener()
+        srv.shutdown()
+
+
+def test_the_credential_is_not_sent_before_the_base_url_is_known():
+    """The host set is empty until `stage0()` resolves the Route or `--public-url`, so
+    an installed credential sends nothing until then. Installing early is required by
+    `test_main_installs_the_credential_before_any_stage_runs`; this pins that doing so
+    does not broadcast the token to whatever is contacted in between."""
+    srv, base, seen = _auth_server()
+    try:
+        flow.install_default_credential("tok123")
+        flow.get_json(f"{base}/x")
+        assert seen[-1][1] is None, \
+            f"no host registered yet, so nothing should be sent, got {seen[-1][1]!r}"
+    finally:
+        srv.shutdown()
+
+
+def test_the_credential_does_not_follow_a_redirect_to_another_host():
+    """urllib's `HTTPRedirectHandler` copies every header except content-length and
+    content-type onto the redirect target — ACROSS ORIGINS, with no same-host rule. The
+    opener is global and `--public-url` is operator-supplied, so without a host check
+    one 302 from a misconfigured ingress, a stale port-forward or a typo'd host hands a
+    live GitHub token to whatever answered."""
+    import http.server
+    import threading
+    srv, base, seen = _auth_server()
+    other_seen: list[str | None] = []
+
+    class R(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            other_seen.append(self.headers.get("Authorization"))
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *a):
+            pass
+
+    other = http.server.HTTPServer(("127.0.0.1", 0), R)
+    threading.Thread(target=other.serve_forever, daemon=True).start()
+    other_base = f"http://127.0.0.1:{other.server_address[1]}"
+
+    class Redirector(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", f"{other_base}/landed")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    hop = http.server.HTTPServer(("127.0.0.1", 0), Redirector)
+    threading.Thread(target=hop.serve_forever, daemon=True).start()
+    hop_base = f"http://127.0.0.1:{hop.server_address[1]}"
+
+    try:
+        flow.install_default_credential("tok123")
+        # Only the base is credentialled. `req.host` carries the port, so these three
+        # local servers are three distinct hosts — which is the distinction that
+        # matters here, where a port-forward and a NodePort share a hostname.
+        flow.credential_host(hop_base)
+        flow.get_json(f"{hop_base}/v0/groups/g1")
+        assert other_seen == [None], \
+            f"the token followed a cross-host redirect: {other_seen!r}"
+    finally:
+        hop.shutdown()
+        other.shutdown()
         srv.shutdown()
 
 
@@ -674,7 +759,6 @@ def test_the_identity_gate_still_sends_no_credential():
                                     headers={"Authorization": "Bearer explicit"})
         assert seen[-1][1] == "Bearer explicit", "an explicit header must still win"
     finally:
-        _reset_opener()
         srv.shutdown()
 
 
@@ -691,10 +775,13 @@ def test_an_existing_authorization_header_is_never_overwritten():
     srv, base, seen = _auth_server()
     try:
         flow.install_default_credential("tok123")
+        # Registered, or the handler would decline on the host check and this would
+        # assert nothing — the default has to be in play for "never overwritten" to
+        # mean anything.
+        flow.credential_host(base)
         flow.get_json(f"{base}/x", headers={"Authorization": "Bearer mine"})
         assert seen[-1][1] == "Bearer mine"
     finally:
-        _reset_opener()
         srv.shutdown()
 
 
@@ -707,3 +794,42 @@ def test_main_installs_the_credential_before_any_stage_runs():
     assert install and stage0, (install, stage0)
     assert min(install) < min(stage0), \
         "the credential must be installed before the first stage"
+
+
+def test_stage0_registers_the_base_host_for_the_credential():
+    """The install happens before any stage and the host set starts empty, so
+    something has to register the host or every stage goes out unauthenticated and the
+    401 the credential exists to avoid comes back. `stage0()` is where `self.base` is
+    resolved, so it is the only place that can."""
+    src = _flow_src()
+    body = src[src.index("    def stage0("):]
+    body = body[:body.index("\n    def ", 1)]
+    assert "credential_host(self.base)" in body, \
+        "stage0 must register the resolved base, or no stage sends a credential"
+    assigns = _call_lines(body, "pf.route_url")
+    registers = _call_lines(body, "credential_host")
+    assert assigns and registers and min(assigns) < min(registers), \
+        "the host can only be registered after self.base is resolved"
+
+
+def test_the_host_set_carries_the_port():
+    """A port-forward and a NodePort share a hostname and are different endpoints.
+    `req.host` includes the port, so the set must too."""
+    _CH = flow._CREDENTIALLED_HOSTS
+    _CH.clear()
+    flow.credential_host("http://127.0.0.1:18080")
+    assert _CH == {"127.0.0.1:18080"}
+    flow.credential_host("http://127.0.0.1:30080")
+    assert _CH == {"127.0.0.1:18080", "127.0.0.1:30080"}, \
+        "distinct ports are distinct hosts"
+
+
+def test_registering_a_blank_base_adds_nothing():
+    """`stage0` returns early on an empty base, but a URL with no netloc must not add
+    an empty-string entry either — `req.host` is never empty, so it would be dead
+    weight that reads like a wildcard."""
+    _CH = flow._CREDENTIALLED_HOSTS
+    _CH.clear()
+    for value in ("", "   ", "/v0/agents"):
+        flow.credential_host(value)
+    assert _CH == set()
