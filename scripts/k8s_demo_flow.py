@@ -1572,6 +1572,17 @@ def main(argv=None) -> int:
     # headers so it can still send none, a bad one, then a good one.
     if install_default_credential(os.environ.get("DEMO_GH_TOKEN")):
         c.log("DEMO_GH_TOKEN found — requests carry Authorization: Bearer <token>")
+        # The mirror of the warning below, and the one that bites quietly: with a token
+        # but no login, every ordinary stage authenticates fine and only
+        # `assert_identity_gate` skips — so an auth-enabled overlay reports a green
+        # sweep having never exercised the thing it exists for. `login.py` warns when
+        # `fetch_login` fails and leaves DEMO_GH_LOGIN unset, which is how you arrive
+        # here; saying it on both sides closes the loop.
+        if not (args.gh_login or "").strip() and args.overlay.startswith("kind-signed"):
+            c.log("NOTE: DEMO_GH_TOKEN is set but --gh-login is empty, so the "
+                  "identity beat will SKIP while every other stage authenticates. "
+                  f"On {args.overlay} that is the beat the overlay exists for — "
+                  "pass --gh-login <login> (login.py prints DEMO_GH_LOGIN).")
     elif args.gh_login:
         c.log("NOTE: --gh-login given but DEMO_GH_TOKEN is not set. On an "
               "auth-enabled overlay every stage will be refused 401. Run: "

@@ -129,7 +129,15 @@ def main(argv: list[str] | None = None) -> int:
         _log(f"  EB_ALLOWED_USERS and ER_ALLOWED_SUBMITTERS must include {login!r}")
         _log(f"  pass --gh-login {login} to scripts/k8s_demo_flow.py")
     else:
+        # Not fatal: the token is valid and printing it is this command's job. But say
+        # plainly what is missing, because `--export` then emits DEMO_GH_TOKEN without
+        # DEMO_GH_LOGIN — and `assert_identity_gate` SKIPS on an empty `--gh-login`
+        # while every other stage authenticates fine. A run that silently did not
+        # exercise the identity beat still reports success.
         _log(f"signed in, but could not read the login back: {err}")
+        _log("  WARNING: no DEMO_GH_LOGIN will be printed. Pass --gh-login <login> to "
+             "scripts/k8s_demo_flow.py by hand, or the identity beat will SKIP and "
+             "the flow will still report success.")
 
     # stdout, alone, so command substitution captures exactly this.
     if args.export:

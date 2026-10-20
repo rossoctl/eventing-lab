@@ -553,6 +553,43 @@ def test_export_mode_emits_both_variables(monkeypatch):
     assert "export DEMO_GH_LOGIN=mrsabath" in out
 
 
+def test_a_failed_login_lookup_warns_that_the_identity_beat_will_skip(monkeypatch):
+    """The quiet failure this guards. `fetch_login` failing is not fatal for the token,
+    and the command still exits 0 — correctly, printing the token is its job. But
+    `--export` then emits DEMO_GH_TOKEN with NO DEMO_GH_LOGIN, the documented
+    invocation passes `--gh-login ""`, and `assert_identity_gate` SKIPS while every
+    other stage authenticates fine. A green sweep that silently did not run the
+    identity beat is the exact shape of the bugs this effort keeps finding — so the
+    warning has to name the consequence, not just the lookup failure."""
+    _fake_github(monkeypatch)
+    monkeypatch.setattr(ghauth, "fetch_login",
+                        lambda t, timeout=5.0: (None, "HTTP Error 403: rate limited"))
+    rc, out, err = _run(["--client-id", "Ov23liFAKE", "--export"])
+
+    assert rc == 0, "a token that works is still a success"
+    assert f"export DEMO_GH_TOKEN={FAKE_TOKEN}" in out
+    assert "DEMO_GH_LOGIN" not in out, "there is no login to export"
+    assert "rate limited" in err, "say why the lookup failed"
+    assert "SKIP" in err and "--gh-login" in err, \
+        "the warning must name the consequence and the remedy, on stderr"
+    assert FAKE_TOKEN not in err, "the token still must not reach stderr"
+
+
+def test_the_flow_warns_when_a_token_has_no_login_on_an_auth_overlay():
+    """The mirror, on the side that actually skips. `main()` already warns for a login
+    with no token; the reverse is the quieter half, because every ordinary stage
+    authenticates and only the newest beat goes missing."""
+    src = (pathlib.Path(__file__).resolve().parents[1]
+           / "scripts" / "k8s_demo_flow.py").read_text()
+    main = src[src.index("def main("):]
+    assert "args.gh_login" in main and "kind-signed" in main, \
+        "the token-without-login case must be detected for auth-enabled overlays"
+    warn = main[main.index("install_default_credential"):]
+    warn = warn[:warn.index("f.stage0()")]
+    assert "SKIP" in warn, \
+        "the note must say the identity beat will skip, not merely that a flag is unset"
+
+
 def test_no_browser_is_opened_by_default(monkeypatch):
     """§2.2's decision, kept: auto-opening fails silently over SSH and inside a
     container, which is where this is most often run. `--open` is opt-in."""

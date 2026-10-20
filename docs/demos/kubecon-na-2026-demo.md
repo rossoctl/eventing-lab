@@ -468,6 +468,15 @@ python3 scripts/k8s_demo_flow.py --overlay kind-signed-device \
 silently over SSH and inside a container, which is where this is most often run (§2.2).
 The code appears **before** any browser launch, so a failed launch is not a dead end.
 
+**Check `DEMO_GH_LOGIN` is actually set.** `login.py` reads the login back from
+`GET /user` after the token arrives, and that call can fail on its own (rate limit, a
+network blip) while the token is perfectly valid — so the command exits 0, `--export`
+emits `DEMO_GH_TOKEN` with no `DEMO_GH_LOGIN`, and the invocation above then passes
+`--gh-login ""`. Every ordinary stage still authenticates; only `assert_identity_gate`
+skips, and the run reports success having never exercised the beat this overlay exists
+for. Both scripts now warn loudly on stderr when this happens — if you see it, pass
+`--gh-login <your-login>` by hand.
+
 **The deterministic one — a Personal Access Token** (`kind-signed-auth`). Use this in CI
 or when you do not want a browser in the loop:
 
