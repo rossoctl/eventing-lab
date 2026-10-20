@@ -727,6 +727,42 @@ def test_the_tag_patch_sets_both_services_and_relaxes_the_pull_policy():
         "conditional on a non-default tag"
 
 
+def test_the_tag_patch_says_it_will_diff_forever():
+    """§14.1 has two mechanisms and this patch defeats both: the render always says
+    `:dev`, so `kubectl diff` reports cluster-side drift on every later run, while
+    `stamp_digest` stamps the digest of the UNPATCHED render and therefore matches.
+    The cheap gate says "unchanged", the authoritative one says "drifted", and they
+    contradict each other permanently — for the one workflow the demo script tells you
+    to use. `k8s/base/configmap.yaml` states the rule from the safe side: a value the
+    manifest never mentions is merged rather than reverted. `image` IS mentioned.
+
+    Not fixable here without making the tag part of the render (the closed #9's
+    `images:` transformer), so the requirement is that it be SAID, not discovered as a
+    confusing "drift detected" on a cluster nobody touched."""
+    src = _deploy_src()
+    body = src[src.index("def _apply_image_tag"):]
+    body = body[:body.index("\n    def ", 1)]
+    assert "drift" in body.lower(), \
+        "the permanent-drift consequence must be stated, in the log and the docstring"
+    logged = [ln for ln in body.splitlines() if "self.c.log" in ln]
+    assert logged, "the note must reach the operator's log, not only the source"
+    assert "--force-deploy" in body, \
+        "the note must say what to do about it — the fast path is now unreachable"
+
+
+def test_the_drift_note_is_only_for_a_non_default_tag():
+    """A `:dev` deploy renders what it patches, so there is no drift and no note.
+    Printing one anyway would train the reader to ignore it."""
+    src = _deploy_src()
+    body = src[src.index("def _apply_image_tag"):]
+    body = body[:body.index("\n    def ", 1)]
+    note = body[body.index("self.c.log"):]
+    guard = body[:body.index("self.c.log")]
+    assert "if not default:" in guard, \
+        "the note must be guarded on a non-default tag"
+    assert "drift" in note.lower()
+
+
 def test_the_default_tag_keeps_the_registry_pull_policy():
     """Only a NON-default tag relaxes the policy. Relaxing it for `:dev` too would
     make a registry deploy silently prefer a stale local layer."""

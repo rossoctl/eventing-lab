@@ -137,9 +137,20 @@ on screen and what to say over it.
     --signing-keys ~/.eventing-keys
   ```
 
+  **A `--tag` deploy then diffs forever, and that is expected.** The overlay renders `:dev`,
+  so once both Deployments are patched to `:local1` the live state disagrees with the render
+  and §14.1's `kubectl diff` reports cluster-side drift on every later run — while the digest,
+  stamped from the *unpatched* render, keeps matching. The cheap gate says "unchanged" and the
+  authoritative one says "drifted". So on a second `--tag` deploy the `deploy not needed` fast
+  path is unreachable: pass `--force-deploy`, or deploy without `--tag` to return to the
+  rendered state. `k8s_deploy.py` prints this as a note rather than leaving it to be found as
+  an unexplained "drift detected" on a cluster nobody touched.
+
   [eventing-lab#9](https://github.com/rossoctl/eventing-lab/issues/9) proposed a `kind-local`
-  overlay and was closed without one being built; the `--tag` fix is what makes that
-  unnecessary.
+  overlay and was closed without one being built. The `--tag` fix makes that unnecessary **for
+  the stale-image bug, and not for change detection** — a two-line `images:` transformer would
+  make the tag part of the render, so the digest and the diff both stay meaningful and no patch
+  is needed. Worth reopening #9 with that narrower scope.
 
   **Restart the port-forward after any deploy that changes an image.** A forward binds to one
   pod and does not follow its replacement, so a rollout silently kills it — and the failure

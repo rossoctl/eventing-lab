@@ -501,6 +501,18 @@ class Deployer:
         container is already running — the stale-image failure in its quietest form.
         Only relaxed for a non-default tag: a `:dev` deploy from a registry should keep
         pulling.
+
+        **This patch diffs forever, by construction.** The rendered overlay always says
+        `:dev` — that is the whole reason this method exists — so after the patch the
+        live Deployments disagree with the render and `kubectl diff` reports
+        cluster-side drift on every later run. `k8s/base/configmap.yaml:8-11` states the
+        rule from the other side: a value the manifest never mentions is merged rather
+        than reverted, which is why `kubectl set env` for the public URL is safe. The
+        `image` field IS mentioned, so patching it is the case that rule warns about.
+        Said out loud below rather than left to be discovered as a confusing "drift
+        detected" on a cluster nobody touched. The structural fix is to make the tag
+        part of the render (the `images:` transformer of the closed #9); until then the
+        honest report is a note, not a silent contradiction.
         """
         tag = (self.args.tag or "").strip()
         if not tag:
@@ -515,6 +527,11 @@ class Deployer:
             res = self.k.patch(f"deploy/{svc}", json.dumps(patch), namespace=self.ns)
             self.c.expect_run(res, f"deploy/{svc} set to {ref}"
                                    + ("" if default else " (IfNotPresent)"))
+        if not default:
+            self.c.log(f"note: the overlay renders `:dev`, so a --tag {tag} deploy "
+                       f"shows as cluster-side drift from here on; pass "
+                       f"--force-deploy on later runs, or deploy without --tag to "
+                       f"return to the rendered state")
 
     def _verify_keyset_landed(self) -> None:
         """Read the keyset back FROM THE CLUSTER and assert it is not empty.
