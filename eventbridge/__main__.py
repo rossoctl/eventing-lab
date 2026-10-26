@@ -229,13 +229,19 @@ def main() -> int:
     h = Handlers(cfg, store, producer, minter, groups=groups,
                  registry=users if topics.multi else None,
                  stores=stores if topics.multi else None,
-                 owners=owners if topics.multi else None)
+                 owners=owners if topics.multi else None,
+                 # §11 — the same approved-key set the responses consumer verifies
+                 # with, so the chain-of-trust view reports what the system actually
+                 # enforces rather than a second opinion. `None` when unset, and the
+                 # page renders "nothing was checked" rather than implying otherwise.
+                 keyset=ks)
     dsp = Dispatcher()
     dsp.add("POST", r"/v0/agents",                                          h.start_agent)
     dsp.add("POST", r"/v0/agents/(?P<correlationid>[a-z0-9-]+)/continue",   h.continue_agent)
     dsp.add("POST", r"/v0/agents/(?P<correlationid>[a-z0-9-]+)/continue-html", h.continue_agent_html)
     dsp.add("GET",  r"/v0/agents/(?P<correlationid>[a-z0-9-]+)",            h.get_html)
     dsp.add("GET",  r"/v0/agents/(?P<correlationid>[a-z0-9-]+)/turns",      h.get_turns)
+    dsp.add("GET",  r"/v0/agents/(?P<correlationid>[a-z0-9-]+)/trust",      h.get_trust)
     dsp.add("GET",  r"/v0/agents/(?P<correlationid>[a-z0-9-]+)/events",     h.get_events)
     dsp.add("GET",  r"/v0/agents/(?P<correlationid>[a-z0-9-]+)/events\.jsonl", h.get_events_jsonl)
     dsp.add("GET",  r"/v0/agents/(?P<correlationid>[a-z0-9-]+)/events\.sse",   h.get_events_sse)

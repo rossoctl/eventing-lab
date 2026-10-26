@@ -102,7 +102,8 @@ class _BadRequest(Exception):
 
 class Handlers:
     def __init__(self, cfg: Cfg, store: Store, producer: Producer, minter: Minter,
-                 groups=None, registry=None, stores=None, owners=None) -> None:
+                 groups=None, registry=None, stores=None, owners=None,
+                 keyset=None) -> None:
         self.cfg = cfg
         # The single store. In single-tenant mode this is the only one and every read
         # and write goes through it, exactly as in Phase 2. In multi-tenant mode it is
@@ -119,6 +120,11 @@ class Handlers:
         # §2.6/§6.2 — the global `correlationid -> userkey` index. None in single-tenant
         # mode, where there is only one tenant and nothing to scope to.
         self.owners = owners
+        # §11 — the approved-key set, for the chain-of-trust view. `None` means
+        # verification is not configured, and the page says so rather than letting
+        # colour imply a check that never ran. Loaded once in `__main__` and shared
+        # with the consumer; `keyset.py` documents why there is no live reload.
+        self.keyset = keyset
         # One cache for the process, so a burst of requests from the same user
         # costs one GitHub call rather than one each.
         self.logins = ghauth.LoginCache(cfg.github_cache_ttl_s)
@@ -702,6 +708,51 @@ class Handlers:
         return [body]
 
     # ---- SSE ----
+    # ---- chain of trust ----
+    def _trust_payload(self, correlationid: str):
+        """`(payload, store)` for one correlation, or `(None, None)` if unplaceable."""
+        from eventbridge import trust
+        store = self._store_of(correlationid)
+        if store is None:
+            return None, None
+        raws = store.raw_events_for(correlationid)
+        prompts = store.get_prompts(correlationid)
+        links = trust.links_for(
+            raws, prompts, self.keyset,
+            bridge_kid=self.cfg.signing_kid or None,
+            rejected=store.rejected_count(correlationid))
+        return {
+            "correlationid": correlationid,
+            "links": trust.as_json(links),
+            "tally": trust.summarise(links),
+            "enforcing": self.keyset is not None,
+            "issuer": trust.issuer_of(raws, prompts),
+            "keyset_kids": len(self.keyset) if self.keyset is not None else 0,
+        }, store
+
+    def get_trust(self, environ, start_response, correlationid: str, **_):
+        """The chain of trust: HTML by default, JSON with `?format=json`.
+
+        One route for both, the same idiom `list_groups` uses — the page polls the JSON
+        form of its own URL, so there is nothing to keep in sync.
+        """
+        if not CORR_REGEX.match(correlationid):
+            return _json(start_response, "400 Bad Request",
+                         {"error": "bad correlationid"})
+        payload, _store = self._trust_payload(correlationid)
+        if payload is None:
+            return _json(start_response, "404 Not Found",
+                         {"error": "unknown correlationid"})
+        if "format=json" in (environ.get("QUERY_STRING", "") or ""):
+            return _json(start_response, "200 OK", payload)
+        from eventbridge.trust_view import render
+        body = render(correlationid, payload["links"], payload["tally"],
+                      enforcing=payload["enforcing"], issuer=payload["issuer"],
+                      keyset_kids=payload["keyset_kids"]).encode()
+        start_response("200 OK", [("Content-Type", "text/html; charset=utf-8"),
+                                  ("Content-Length", str(len(body)))])
+        return [body]
+
     def get_events_sse(self, environ, start_response, correlationid: str, **_):
         qs = urllib.parse.parse_qs(environ.get("QUERY_STRING", ""))
         try:

@@ -55,6 +55,22 @@ def spec() -> dict:
                     "responses": {"200": {"description": "OK", "content": {"application/json": {}}}},
                 }
             },
+            "/v0/agents/{correlationid}/trust": {
+                "get": {
+                    "summary": ("The chain of trust for one correlation: who asked, what "
+                                "was signed, what was verified — and which links prove "
+                                "less than a tick would suggest"),
+                    "operationId": "getAgentTrust",
+                    "parameters": [
+                        {"in": "path", "name": "correlationid", "required": True, "schema": {"type": "string"}},
+                        {"in": "query", "name": "format", "required": False,
+                         "schema": {"type": "string", "enum": ["json"]},
+                         "description": "format=json returns the links; omit it for the HTML page"},
+                    ],
+                    "responses": {"200": {"description": "OK", "content": {
+                        "text/html": {}, "application/json": {}}}},
+                }
+            },
             "/v0/groups": {
                 "post": {
                     "summary": "Create a group of agents and fan it out",

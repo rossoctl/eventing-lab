@@ -206,6 +206,22 @@ class Store:
         ).fetchall()
         return [json.loads(r[0]) for r in rows]
 
+    def rejected_count(self, corr: str) -> int:
+        """How many stored rows for this correlation were refused signature checks.
+
+        The `rejected` column has existed since #885 and no reader selected it, so the
+        one fact that distinguishes "verified" from "refused but kept for review" was
+        unreachable from the HTTP layer. The chain-of-trust page needs exactly this:
+        a refused event is *stored* rather than dropped — a drop is indistinguishable
+        from an agent that never answered — so its presence cannot be inferred from
+        the rows being there.
+        """
+        row = self._r.execute(
+            "SELECT COUNT(*) FROM responses WHERE correlationid=? AND rejected=1",
+            (corr,),
+        ).fetchone()
+        return int(row[0]) if row else 0
+
     def final_seen(self, corr: str) -> bool:
         # A rejected terminal still carries final=1, so this reports "answered" for a
         # correlation whose only terminal event was refused. Presentational rather than

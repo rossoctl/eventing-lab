@@ -1,6 +1,6 @@
 # DESIGN — Phase 2: identity on the event path
 
-Version: 2.1 — October 2026 <!-- revision 2: §8 records 13 control claims the docs review found unsupported; revision 2.1: §8.6 — the cluster run found a class the venv harness cannot reach -->
+Version: 2.2 — October 2026 <!-- revision 2: §8 records 13 control claims the docs review found unsupported; revision 2.1: §8.6 — the cluster run found a class the venv harness cannot reach; revision 2.2: §9 — the chain-of-trust view, and why three of its eight links are amber rather than green -->
 Status: Accepted <!-- signing is deployable and has now run on a cluster; see ../reports/phase2-cluster-run-report.md. §8 lists the claims that do not yet hold -->
 Scope: **delta over `../specs/0002-phase1-keda-kubernetes.md`.** Read that first. This document records
 only what changes when the demo stops trusting whoever can reach it.
@@ -746,3 +746,85 @@ Two habits came out of it:
 - **A suggested wording is a hypothesis.** Run it before adopting it, including your
   reviewer's — especially when it reads as though it came from a docstring.
 
+
+---
+
+## 9. The chain-of-trust view
+
+Added October 2026. `eventbridge/trust.py` (pure) and `eventbridge/trust_view.py`
+(rendering), served at `GET /v0/agents/<corr>/trust` — HTML by default, JSON with
+`?format=json`.
+
+The controls in this document are each demonstrable on their own: §2.4's `401`/`403`,
+§4.4's refused forgery, the audit chain. What none of them showed was the **chain** — and
+"chain of trust" is the claim the system is presented under. This page renders it for one
+correlation, link by link, updating once a second.
+
+### 9.1 Why three of the eight links are amber
+
+**Eight green ticks would be a more confident claim than the evidence supports**, which
+is the failure §8 is a record of. So the page has three states that matter — proven,
+weaker-than-it-looks, failed — and the *reason* is rendered beside every amber link
+rather than left to a footnote.
+
+| Link | Evidence | State |
+|---|---|---|
+| the asker was authenticated | `submitter` on the turn tape, `submitteriss` on an event | green; **amber with no issuer** — absent means a static token, §2.6's weaker claim |
+| …and was on the approved list | the request exists, so `EB_ALLOWED_USERS` let it through | **amber** — the gate ran, but its decision is not recorded on the event. A refused user leaves no request at all, so this is inferred |
+| the wake event was signed | the response's `causationid` names a wake event | **amber** — EventBridge signs every request it publishes, but the request envelope is not stored. §9.3 |
+| the runner verified it | response events exist, so the runner acted | **amber** — `ER_REQUIRE_SIGNATURE=true` refuses an unsigned request before the agent starts, but that verdict is in the runner's log, not this store |
+| the answer was signed | `ce_signature` on the terminal event | green — and the page states signing is terminal-only, so it proves *who finished a run*, not what it said along the way |
+| the bridge verified the answer | stored `phase=result`, and `responses.rejected == 0` | green |
+| …by a named, approved agent | `kid` resolves in the approved set | **amber** — §8.3's finding, rendered: this is **attribution, not restriction**. A flat keyset cannot express "this agent may answer *this* request", so any approved runner's key verifies here |
+| the answer is bound to that wake | `causationid`, which is inside `SIGNED_ATTRS` | green |
+
+The amber on *"by a named, approved agent"* is the one worth defending. §8.3 recorded
+that a flat keyset makes the asymmetric keys attribution rather than restriction, and
+that the conclusion was drawn for group events and **not** for member answers. A green
+tick there would have re-made exactly that overclaim, in colour, on a projector.
+
+### 9.2 What this does not do
+
+- **It cannot prove the request side.** See §9.3.
+- **With no keyset configured, nothing is checked and nothing renders red.** The page
+  says *"Verification is off… what you see is what the events claim."* A red link would
+  assert an outcome never observed, which is worse than silence — and it is the easiest
+  way for this page to mislead, because the events still carry signatures and kids that
+  *look* checkable. `test_with_no_keyset_nothing_renders_red` pins it; the first
+  implementation failed it, reporting "kid runner-01 did not verify" when nothing had
+  verified anything.
+- **It reports per-correlation, not per-system.** A clean chain says nothing about the
+  other correlations on the topic; `scripts/audit_topic.py` is the whole-topic view.
+- **Mid-run reads are grey, not red.** Reading before the terminal event lands is not
+  tampering, and must not look like it.
+
+### 9.3 The request envelope is not stored, and that bounds two links
+
+Only a `prompts` row survives a request — `kafka_requests_mirror.py` sees the envelope
+and discards it after `backfill_prompt_if_missing`. So the two request-side links read
+*consequences* rather than the request's own signature: a response naming a
+`causationid` means a wake event was published, and a response existing at all means the
+runner accepted it.
+
+Both are evidence, not proof, and both are amber for that reason. Persisting the request
+envelope would promote them to green and is the obvious next step; it is a schema change
+plus a mirror change, and it grows storage on every request, so it is recorded here
+rather than done.
+
+### 9.4 Reuse, and one boundary worth knowing
+
+The verdict vocabulary is `shared/audit.py`'s — `classify()`, `row_for()`, and the
+`VERDICT_*` constants — so the page and `scripts/audit_topic.py` cannot disagree about
+what "signed-ok" means. The visual language is `group_view.py`'s.
+
+**`Store.raw_events_for` returns flattened envelopes; `audit.row_for` needs a
+`CloudEvent`.** `canonical()` reads `event.attrs` and `event.data` separately, so a flat
+dict raises `AttributeError` on `.attrs`. `trust.rehydrate()` is the inverse of
+`envelope_dict`, and it **drops `__`-prefixed keys** — those are local verdicts
+(`ce.KEY_REJECTED`), never wire attributes, and letting one into `attrs` would feed the
+canonicaliser a field the signer never covered.
+
+`Handlers` now takes `keyset=`; it was the only component with a verification story and
+no access to the key set. `Store.rejected_count()` exposes the `rejected` column, which
+had existed since the §4.4 fix with no reader — so the one fact distinguishing "verified"
+from "refused but kept for review" was unreachable from the HTTP layer.
