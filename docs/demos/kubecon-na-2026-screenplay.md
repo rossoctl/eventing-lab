@@ -4,17 +4,21 @@
 [`kubecon-na-2026-demo.md`](kubecon-na-2026-demo.md) is the reference — why each beat
 exists, what it does *not* prove, and the full assertion list. This file is the shot list.
 
-**Six beats, ~4 minutes of screen time.** The slides carry the explanation; the demo only
-has to make the value *visible*. Every beat here answers one question in one screen.
+**Six beats, ~4 minutes of screen time, five terminals.** The slides carry the explanation;
+the demo only has to make the value *visible*. Every beat answers one question in one screen,
+and the `Pane` column says which terminal it happens in — see "The pane layout" below.
 
-| # | Beat | Question it answers | Screen time | State |
-| --- | --- | --- | --- | --- |
-| **0** | No pods at all | "What does idle cost?" | 15 s | ✅ verified |
-| **1** | Approved user in, everyone else out | "Who may ask?" | 45 s | ✅ verified 2026-10-19 |
-| **2** | 100 agents, one POST | "Does it scale?" | 90 s | ⚠️ **never run on a cluster** |
-| **3** | Back to zero | "What does it cost when nobody asks?" | 30 s | ✅ verified |
-| **4** | A forged wake is refused | "Who may answer?" | 45 s | ✅ verified 2026-10-14 |
-| **5** | The audit trail | "How would you *know*?" | 30 s | ✅ verified 2026-10-14 |
+**Every beat below has run on a cluster.** Dates in the State column are the runs that
+proved them, not the dates they were written.
+
+| # | Beat | Question it answers | Pane | Screen time | State |
+| --- | --- | --- | --- | --- | --- |
+| **0** | No pods at all | "What does idle cost?" | A·B·C | 15 s | ✅ verified |
+| **1** | Approved user in, everyone else out | "Who may ask?" | A | 45 s | ✅ verified 2026-10-19 |
+| **2** | 100 agents, one POST | "Does it scale?" | A·B·C·D | 90 s | ✅ verified 2026-10-26 |
+| **3** | Back to zero | "What does it cost when nobody asks?" | B | 30 s | ✅ verified |
+| **4** | A forged wake is refused | "Who may answer?" | A·E | 45 s | ✅ verified 2026-10-14 |
+| **5** | The audit trail | "How would you *know*?" | A | 30 s | ✅ verified 2026-10-14 |
 
 **Record all of it.** Beat 2 drains in about a minute, and beat 3's wait is short but real. And the
 ingress drops ~40% of POSTs ([#9](https://github.com/rossoctl/eventing-lab/issues/9)), so
@@ -22,12 +26,9 @@ every verified number came through a **port-forward** — a live POST over the R
 coin flip in front of a room. Narrate over the recording; keep a terminal open for
 questions.
 
-> **Beat 2 is not yet verified.** `--group 100` exists and is documented as the demo figure,
-> but the 2026-10-14 cluster run never drove it — only a 2-member group for the forgery
-> target. It needs one rehearsal run, which folds into
-> [#14](https://github.com/rossoctl/eventing-lab/issues/14)'s rebuilt rig. **Do not record
-> beat 2 until it has run once.** If it does not run in time, cut it and say the fan-out
-> figure from a slide instead — the §1.2 rule applies: a cut beat is stated, not narrated.
+> **Beat 2 ran on a cluster 2026-10-26**: 100 agents from one POST, **1m04s, 100 finished,
+> 0 failed, peak 10 replicas**. It was the last beat never to have been executed. The figures
+> in §"What it looked like when it ran" are from that run.
 
 ---
 
@@ -104,18 +105,73 @@ holds ([eventing-lab#23](https://github.com/rossoctl/eventing-lab/issues/23)).
   . ./.demo-env          # in every pane, including the ones that only watch
   ```
 
-**Two panes, side by side, for every beat.** Left: the command. Right:
-`watch_topics.py` running. The queue depth is the through-line of the whole demo and the
-thing that makes KEDA concrete rather than a slogan.
+## The pane layout
+
+Five terminals, set up **before** the camera rolls. Every one of them needs the environment,
+including the ones that only watch — `kubectl` needs `--kubeconfig` and beat 1 needs the
+token:
 
 ```sh
-# the right-hand pane, started once and left alone
-python3 scripts/watch_topics.py --interval 2
+# in EVERY pane
+cd <your eventing-lab clone>
+export KC=.kube/config-kind
+export EB=http://127.0.0.1:18080
+. ./.demo-env                      # the token, written once in Setup step 3
 ```
+
+| Pane | Size on screen | What it shows | Started |
+|---|---|---|---|
+| **A** commands | large, where the eye goes | what you type | per beat |
+| **B** pods | medium | KEDA creating and destroying replicas | once, left running |
+| **C** queue | medium | lag, split claimed vs unclaimed | once, left running |
+| **D** browser | full width when used | the group page — progress in *agent* units | beat 2 only |
+| **E** refusals | small, can be off-screen | the runner's refusal line | **before** beat 4 |
+
+**Pane B — the fan-out.** This is the pane the audience watches during beat 2.
+
+```sh
+kubectl --kubeconfig "$KC" -n kev1 get pods \
+  -l app.kubernetes.io/name=eventrunner -w
+```
+
+**Pane C — the queue.** `--group latest` re-resolves the most recent group every frame, so
+**start it before launching the batch** and it picks it up with no id to copy mid-demo.
+
+```sh
+python3 scripts/watch_topics.py --kubeconfig "$KC" \
+  --group latest --url "$EB" --interval 2
+```
+
+**Pane D — the group page.** Open `$EB/v0/groups/$GID` *after* the POST in beat 2. It
+auto-refreshes, so open it once and leave it. Use the `127.0.0.1:18080` form, **not** the
+`html_url` the API returns — that is the ingress path, which drops ~40% of POSTs
+([#9](https://github.com/rossoctl/eventing-lab/issues/9)).
+
+**Pane E — the refusals.** Beat 4's only evidence is a log line, and the pod is gone ~5 s
+after the work drains. Start this first:
+
+```sh
+kubectl --kubeconfig "$KC" -n kev1 logs deploy/eventrunner --tail=-1 -f 2>/dev/null \
+  | grep --line-buffered -iE 'reject|unsigned' | tee /tmp/refusals.log
+```
+
+**Pane A — the port-forward goes here**, and it is the first thing to check. It dies when
+the bridge pod restarts, and a dead forward looks exactly like a broken demo:
+
+```sh
+pkill -f 'port-forward.*18080'; sleep 1
+kubectl --kubeconfig "$KC" -n kev1 port-forward svc/eventbridge 18080:8080 \
+  >/dev/null 2>&1 &
+sleep 3; curl -sS -m 5 -o /dev/null -w 'bridge %{http_code}\n' "$EB/healthz"   # expect 200
+```
+
+**Why C and B are both up:** C is infrastructure units — partitions, lag, offsets. D is
+human units — "73 of 100 done, 14 running, about a minute left". The same reality in two
+vocabularies is the demo; neither alone lands it.
 
 ---
 
-## Beat 0 — there are no pods  (15 s)
+## Beat 0 — there are no pods  (15 s) · pane A, point at B and C
 
 ```sh
 kubectl -n kev1 get deploy eventrunner
@@ -134,7 +190,7 @@ and the fan-out has nothing to fan out *from*.
 
 ---
 
-## Beat 1 — who may ask  (45 s)
+## Beat 1 — who may ask  (45 s) · pane A
 
 Three POSTs. The first two fail, and they fail *differently*.
 
@@ -196,7 +252,7 @@ another 15 s; the 401/403 distinction is a good slide either way.
 
 ---
 
-## Beat 2 — 100 agents, one POST  (90 s)  ⚠️ REHEARSE FIRST
+## Beat 2 — 100 agents, one POST  (90 s) · pane A, then B + C + D
 
 The centrepiece. One call submits a hundred agents; KEDA does the rest.
 
@@ -249,7 +305,7 @@ own rehearsal, not that one.
 
 ---
 
-## Beat 3 — back to zero  (30 s)
+## Beat 3 — back to zero  (30 s) · pane B
 
 ```sh
 kubectl -n kev1 get deploy eventrunner -w
@@ -273,7 +329,7 @@ and if a number reaches a slide, name the rig, because the three values are 5 / 
 
 ---
 
-## Beat 4 — who may answer  (45 s)
+## Beat 4 — who may answer  (45 s) · pane A, evidence in E
 
 A forged **wake** — an event injected straight onto the requests topic, correctly encoded
 and unsigned, exactly as an attacker with broker access would write it.
@@ -325,7 +381,7 @@ someone will ask.
 
 ---
 
-## Beat 5 — how would you know?  (30 s)
+## Beat 5 — how would you know?  (30 s) · pane A
 
 Beat 4 showed the gate holding. This is the question auditors actually ask.
 
@@ -427,7 +483,8 @@ Cut in this order. Each cut is stated on a slide, never narrated as if it ran.
 1. **Beat 3** (back to zero) — fold it into beat 2's tail as a single `+30 s` jump.
 2. **Beat 5's chain view** — keep the summary line only.
 3. **Beat 1's 403 variant**, if you added it.
-4. **Beat 2** — if it has not been rehearsed, it was never in. Say the figure from a slide.
+4. **Beat 2** — the most expensive 90 s in the demo. Cutting it costs the most, so cut it
+   last; say the figure from a slide if you must.
 
 **Never cut beats 1 and 4.** Those two are the talk: who may ask, and who may answer.
 
@@ -450,7 +507,7 @@ python3 scripts/k8s_demo_flow.py --kubeconfig .kube/config-kind \
 ## Pre-flight, the night before
 
 - [ ] `k8s_demo_flow.py` reports **all checks passed** on the rig you will record on
-- [ ] Beat 2 rehearsed at least once — the fan-out reached 10 pods and drained
+- [ ] Beat 2 rehearsed on THIS rig — the fan-out reached 10 pods and drained
 - [ ] `DEMO_GH_LOGIN` is non-empty (`login.py` can emit a token without it; §8.3)
 - [ ] Port-forward up; **the public Route is NOT exposed** ([#1](https://github.com/rossoctl/eventing-lab/issues/1): `PUT /transcript` is unauthenticated)
 - [ ] Every number that reaches a slide is labelled with the cluster it came from
