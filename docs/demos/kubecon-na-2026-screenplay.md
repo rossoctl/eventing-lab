@@ -16,8 +16,7 @@ has to make the value *visible*. Every beat here answers one question in one scr
 | **4** | A forged wake is refused | "Who may answer?" | 45 s | ✅ verified 2026-10-14 |
 | **5** | The audit trail | "How would you *know*?" | 30 s | ✅ verified 2026-10-14 |
 
-**Record all of it.** Beat 3 cannot be done live — the cooldown is 30 s in the kind overlay
-and 300 s in base, which is dead air either way. Beat 2 drains in about a minute. And the
+**Record all of it.** Beat 2 drains in about a minute, and beat 3's wait is short but real. And the
 ingress drops ~40% of POSTs ([#9](https://github.com/rossoctl/eventing-lab/issues/9)), so
 every verified number came through a **port-forward** — a live POST over the Route is a
 coin flip in front of a room. Narrate over the recording; keep a terminal open for
@@ -51,10 +50,13 @@ echo "signed in as: ${DEMO_GH_LOGIN:?login did not come back — pass --gh-login
 # 4. Put YOUR login in the overlay. Both ship as CHANGEME on purpose.
 #    EB_ALLOWED_USERS      — who may ask (EventBridge, at the edge)
 #    ER_ALLOWED_SUBMITTERS — who the runner will act for
-$EDITOR k8s/overlays/kind-signed-device/kustomization.yaml
+sed -i '' "s/CHANGEME-your-github-login/$DEMO_GH_LOGIN/g" \
+  k8s/overlays/kind-signed-device/kustomization.yaml
+# (GNU sed: drop the '' argument)
 
 # 5. Deploy with signing ENFORCED in both directions.
-python3 scripts/k8s_deploy.py --yes --overlay kind-signed-device \
+python3 scripts/k8s_deploy.py --yes --kubeconfig .kube/config-kind \
+  --overlay kind-signed-device \
   --signing-keys ~/.eventing-keys
 
 # 6. Port-forward, and keep it up for the whole recording. NOT the ingress (#9).
@@ -62,12 +64,45 @@ kubectl -n kev1 port-forward svc/eventbridge 18080:8080 &
 export EB=http://127.0.0.1:18080
 
 # 7. Prove the whole thing green once, before recording a single frame.
-python3 scripts/k8s_demo_flow.py --overlay kind-signed-device \
+python3 scripts/k8s_demo_flow.py --kubeconfig .kube/config-kind \
+  --overlay kind-signed-device \
   --gh-login "$DEMO_GH_LOGIN" --public-url "$EB" --tag local1
 ```
 
 Step 7 is the rehearsal. **If it does not report all checks passed, do not record** — every
-beat below is a slice of that run, and the flow is what proves the slices are honest.
+beat below is a slice of that run, and the flow is what proves the slices are honest. One
+known exception: the forged-request check fails on a reporting bug while the control itself
+holds ([eventing-lab#23](https://github.com/rossoctl/eventing-lab/issues/23)).
+
+### Three things that will bite, all of them found by running this
+
+- **Step 4 makes the working tree dirty, and the suite will go red.**
+  `test_the_device_overlay_ships_a_placeholder_login_not_a_real_one` asserts the overlay
+  still says `CHANGEME` — correctly, so a committed overlay never approves a specific
+  person on every cluster it reaches. Expect one failing test while your edit is in place,
+  and **do not commit the overlay**.
+
+- **The registry's `:dev` eventbridge image has no signing code.** Preflight check 14
+  refuses the deploy, which is the check working
+  ([eventing-lab#24](https://github.com/rossoctl/eventing-lab/issues/24)). Build locally
+  and load, then deploy at that tag — this is why every command here carries `--tag`:
+
+  ```sh
+  python3 scripts/build_images.py --local --tag local1
+  kind load docker-image --name kev1 \
+    quay.io/aslomnet/rossoctl-eventbridge:local1 \
+    quay.io/aslomnet/rossoctl-eventrunner:local1
+  ```
+
+- **Every pane needs the credential.** `eval "$(python3 scripts/login.py …)"` sets
+  `DEMO_GH_TOKEN` in *one* shell. In another pane the POST goes out with an empty bearer
+  and you get a `KeyError` traceback instead of a readable refusal. Write the env once and
+  source it everywhere:
+
+  ```sh
+  python3 scripts/login.py --client-id Ov23liA2Z4jfbFRoJKZn --open --export > .demo-env
+  . ./.demo-env          # in every pane, including the ones that only watch
+  ```
 
 **Two panes, side by side, for every beat.** Left: the command. Right:
 `watch_topics.py` running. The queue depth is the through-line of the whole demo and the
@@ -115,17 +150,23 @@ curl -i -sS -X POST "$EB/v0/agents" \
   -H 'Content-Type: application/json' \
   -d '{"prompt":"Summarise the incident.","max_turns":1}' | head -4
 
-# (c) the approved user
-CORR=$(curl -sS -X POST "$EB/v0/agents" \
+# (c) the approved user. The guard and the echoed body are deliberate: an unset token
+# otherwise produces a Python KeyError traceback on stage instead of a readable refusal.
+: "${DEMO_GH_TOKEN:?not signed in in THIS pane — source ./.demo-env}"
+RESP=$(curl -sS -X POST "$EB/v0/agents" \
   -H "Authorization: Bearer $DEMO_GH_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"prompt":"Summarise the incident.","max_turns":1}' \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["correlationid"])')
-echo "accepted as $CORR"
+  -d '{"prompt":"Summarise the incident.","max_turns":1}')
+echo "$RESP" | python3 -m json.tool
+CORR=$(echo "$RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("correlationid",""))')
+echo "accepted as ${CORR:?request was refused — see the body above}"
 
-# and who the event says asked — read back off the turn tape, not typed by the caller
-curl -sS "$EB/v0/agents/$CORR/turns" \
-  -H "Authorization: Bearer $DEMO_GH_TOKEN" | python3 -m json.tool | grep -i submitter
+# and who the event says asked — read back off the turn tape, not typed by the caller.
+# No credential here on purpose: `get_turns` is NOT a guarded route, and sending one in
+# the beat about which requests need a credential teaches the wrong thing. Six routes are
+# guarded — start_agent, create_group, list_groups and the group mutations — and reads
+# are not among them (eventing-lab#1).
+curl -sS "$EB/v0/agents/$CORR/turns" | python3 -m json.tool | grep -i submitter
 ```
 
 ```text
@@ -188,7 +229,12 @@ appear until **10** → the group page's percentage climbs → lag drains to 0.
 **Say:** "One POST, a hundred agents. Nobody provisioned anything. KEDA is reading queue
 depth and creating pods — it stops at ten because `maxReplicaCount` is ten, and because
 the topic has twelve partitions, which is the real ceiling: a partition is the unit of
-assignment, so eleven pods would leave one idle."
+assignment, so a pod can hold several but a partition is never split — twelve is the point
+past which an extra pod gets nothing at all."
+
+**Get this right if you say it.** With 12 partitions, 11 pods means one pod holds **two**
+partitions; nothing is idle. Idle pods begin at 13. The cap of 10 is a deliberate setting,
+not a limit the system bumped into.
 
 **The detail worth pointing at:** the watcher splits lag into *claimed* and *unclaimed*.
 That split exists because this system defers the Kafka offset commit until the agent's
@@ -219,9 +265,11 @@ optimisation here — it is the thing that makes the trust-scope question intere
 an allowlist read at pod start is re-read on the *next* wake. Change it while there are zero
 pods and the next request is judged by the new rules."
 
-**Cut the wait in the edit.** An explicit on-screen `+30 s` jump is honest and keeps the
-pace; dead air is not. The cooldown is 30 s in the kind overlay, 300 s in base — say which
-rig if a number appears on a slide.
+**The cooldown on the recording rig is 5 s**, not 30. `k8s/overlays/kind/kustomization.yaml`
+patches `/spec/cooldownPeriod` to `5`, and `kind-signed-device` inherits it through
+`../kind-signed` → `../kind`; the `30` in the comment above that patch records an old ykt1
+measurement, not this setting. Base is 300 s. So this beat is quick enough to leave uncut —
+and if a number reaches a slide, name the rig, because the three values are 5 / 30 / 300.
 
 ---
 
@@ -236,16 +284,25 @@ cut to the log in the edit:
 
 ```sh
 # ~2 min: skips the two slow gates, keeps every signed beat
-python3 scripts/k8s_demo_flow.py --overlay kind-signed-device \
+python3 scripts/k8s_demo_flow.py --kubeconfig .kube/config-kind \
+  --overlay kind-signed-device \
   --gh-login "$DEMO_GH_LOGIN" --public-url "$EB" --tag local1 \
   --skip-cold-continue --skip-idle-replay
 ```
 
-The frame that matters is the runner refusing it:
+**Start the log capture BEFORE the flow.** This beat's only evidence is a log line, and the
+flow ends on `stage3()` — scale-back-to-zero — with a 5 s cooldown. Run the grep afterwards
+and `logs deploy/eventrunner` resolves through a Deployment with no pods and returns nothing
+(or `error: timed out waiting for the condition`). The run-of-show's checklist says this; it
+is easy to drop when transcribing commands.
 
 ```sh
-kubectl -n kev1 logs deploy/eventrunner --tail=-1 | grep -i 'reject\|unsigned'
+# pane E, started FIRST and left running for the whole beat
+kubectl -n kev1 logs deploy/eventrunner --tail=-1 -f 2>/dev/null \
+  | grep --line-buffered -iE 'reject|unsigned' | tee /tmp/refusals.log
 ```
+
+The frame that matters, captured while the pod is briefly up:
 
 ```text
 [eventrunner] rejecting unsigned/badly-signed request corr=forged-1761…:
@@ -273,8 +330,19 @@ someone will ask.
 Beat 4 showed the gate holding. This is the question auditors actually ask.
 
 ```sh
-python3 scripts/audit_topic.py --chains
+python3 scripts/audit_topic.py --kubeconfig .kube/config-kind --tag local1 \
+  --chains --verify
 ```
+
+`--verify` is what makes this a beat rather than a wall of counts: without it the tool
+asserts nothing and prints no verdict, deliberately — `audit_locally` returns 0 early
+because "a harness that asserted nothing has proven nothing". With it the beat ends on
+`PASS`/`FAIL`.
+
+**One caveat before you add `--verify` to a recording:** it asserts a *clean* topic, so it
+fails if a forgery from beat 4 is still on it. Either run beat 5 on a purged topic, or keep
+`--chains` alone and read the `ORPHANED` line aloud — which is the stronger demo anyway,
+because the forgery is visible rather than merely counted.
 
 ```text
   wake 27504bea  brave-otter-4718   2 result(s)  BOUND
@@ -302,6 +370,56 @@ teams discover they cannot answer.
 
 ---
 
+## What it looked like when it ran
+
+Measured on a Kind rig 2026-10-26 — `kind-signed-device`, signing enforced both
+directions, mock mode, images at `--tag local1`. **Your numbers will differ; these are
+what "working" looks like, not targets.**
+
+| | Measured | Note |
+|---|---|---|
+| Full flow | **70 of 71 checks** | the 1 failure is [#23](https://github.com/rossoctl/eventing-lab/issues/23), a reporting bug |
+| Cold wake, lag → `Active=True` | **6.3 s** | ~3000 ms of it the broker's `group.initial.rebalance.delay.ms` |
+| Pod Ready after POST | 6.9 s | |
+| Turn 1, submit → terminal | 2–6 s | mock |
+| **Beat 2 — group of 100** | **1m04s, 100 finished, 0 failed, peak 10 replicas** | within 2 s of Phase 1's 1m02s on other hardware, pre-signing |
+| Signed / total events | 2 / 6 | terminal-only by policy |
+| Audit | 10 chains `BOUND`, forgeries `ORPHANED` | `signed-ok 24, terminals 14 (12 verified)` |
+| Replay guard | 35 stale requests dropped | no agent re-run |
+
+Rig: single-node Kind, podman, arm64, 6 CPU / 11.6 GiB allocatable, ephemeral Kafka.
+**Every figure came through a port-forward, not the ingress** —
+[#9](https://github.com/rossoctl/eventing-lab/issues/9) is unchanged.
+
+**Do not quote a wake under a second.** A second run reported `0.1s` because a pod was
+still spinning down from a prior stage, so KEDA flipped `Active=True` immediately. The
+honest cold-wake figure is the 6.3 s above.
+
+## Cleaning up between runs
+
+The demo is self-cleaning — every beat ends at zero replicas, and a plain re-run mints
+fresh ids. The only nuisance is accumulated history: old batches in `/v0/groups`, and a
+growing audit summary.
+
+```sh
+# rehearsing: nothing to do, just re-run
+
+# clean audit screen for a recording — deletes the app objects AND both
+# KafkaTopics with their history, keeps the namespace
+python3 scripts/k8s_teardown.py --kubeconfig .kube/config-kind --purge --yes
+python3 scripts/k8s_deploy.py --yes --kubeconfig .kube/config-kind \
+  --overlay kind-signed-device --signing-keys ~/.eventing-keys --tag local1
+
+# done for the day, want it back tomorrow: pauses, keeps topics AND data
+python3 scripts/k8s_teardown.py --kubeconfig .kube/config-kind
+python3 scripts/k8s_teardown.py --kubeconfig .kube/config-kind --resume
+```
+
+After a purge, re-establish the port-forward and re-source `.demo-env` — the pod is new.
+Two things that look alarming after a pause and are correct: a paused ScaledObject still
+reports `Active=True` while messages sit in the topic, and the Route stays resolvable
+while pointing at zero endpoints, so it serves a 503 rather than a DNS error.
+
 ## If you are over time
 
 Cut in this order. Each cut is stated on a slide, never narrated as if it ran.
@@ -322,7 +440,8 @@ and can be screen-captured as-is. Less cinematic, entirely honest, and it prints
 verdict:
 
 ```sh
-python3 scripts/k8s_demo_flow.py --overlay kind-signed-device \
+python3 scripts/k8s_demo_flow.py --kubeconfig .kube/config-kind \
+  --overlay kind-signed-device \
   --gh-login "$DEMO_GH_LOGIN" --public-url "$EB" --tag local1 --group 100
 ```
 
