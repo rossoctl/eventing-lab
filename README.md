@@ -184,7 +184,7 @@ Full runbooks for Docker, Kind and OpenShift:
 | `k8s/` | Kustomize base + overlays (`test`, `kind`, `kind-signed`, `kind-signed-auth`, `kind-signed-device`, `demo`) |
 | `scripts/` | Build, deploy, preflight, e2e and demo-flow drivers |
 | `skills/` | The `/eventbridge` CLI skill |
-| `tests/` | Unit tests across 48 files — no Kafka or `claude` needed |
+| `tests/` | Unit tests — no Kafka or `claude` needed |
 | `docs/` | Specs, reports, demos, ADRs, notes — see [`docs/README.md`](docs/README.md) |
 
 ```bash
