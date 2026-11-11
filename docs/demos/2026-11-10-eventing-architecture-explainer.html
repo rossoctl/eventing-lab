@@ -960,9 +960,9 @@ function batchSteps(){ return [
              '# over 10 consumers means two own two each.'],
     payload:['why ten and not a hundred:',
              '',
-             '  ceil(100 / 1)      = 100   ← what the lag asks for',
-             '  maxReplicaCount    =  10   ← the configured cap',
-             '  requests partitions=  12   ← Kafka’s hard ceiling',
+             '  ceil(100 / 1)           = 100   ← what the lag asks for',
+             '  maxReplicaCount         =  10   ← the configured cap',
+             '  kev1-requests partitions=  12   ← Kafka’s hard ceiling',
              '',
              'effective = min(100, 10, 12) = 10',
              '',
@@ -1012,7 +1012,7 @@ function batchSteps(){ return [
       S.kCalc=['replicas 10 Ready at t=6s',
                'first terminals land ~t=12s',
                'no thundering herd: the ceiling is already bounded'];
-      S.note='0/100 done · 100 queued · 8s elapsed'; },
+      S.note='0/100 done · 4 running · 96 queued · 8s elapsed'; },
     overlay:function(t){
       chipAt.apply(null, along(P.r2n, ease(seg(t,0,.7))).concat(['×10 consume', C.blue]));
     }
