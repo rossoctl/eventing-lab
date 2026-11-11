@@ -15,12 +15,30 @@ being performed live in front of an audience.
 | [`ykt1-three-part-demo.md`](ykt1-three-part-demo.md)           | The OpenShift run-of-show as three questions: works / provable / holds           |
 | [`agent-groups-demo.md`](agent-groups-demo.md)                  | Batch fan-out: three agents, then 100 — and why a batch sends two notifications, not 100 |
 | [`eventbridge-cli.md`](eventbridge-cli.md)                      | Driving any environment with the `/eventbridge` skill, and the `EVENTBRIDGE_URL` convention |
+| [`2026-11-10-eventing-architecture-explainer.html`](https://rossoctl.github.io/eventing-lab/demos/2026-11-10-eventing-architecture-explainer.html) | **Clicked, not typed** — the wire path as a steppable diagram, with each step's Kafka headers and data payload |
 
 **▶ The recorded demo is on YouTube:
 [Eventing in Rossoctl for KubeCon NA 2026](https://youtu.be/s6494nZZ-hM).** The screenplay
 below is the shot list it was cut from.
 
-All seven are runbooks you read while typing, which is why they live here rather than in
+**The explainer is the odd one out here, deliberately.** Every other file in this directory
+is read while typing; the explainer has no commands at all — you open it in a browser and
+press Next. By this README's own rule it is a _reference you consult_, which would put it in
+[`../notes/`](../notes/). It lives here anyway because it shares its subject with the two
+KubeCon files and because "show me it working" is what sends people to `demos/`. It is one
+self-contained HTML file with no build step, so it opens from a `git clone` or an email
+attachment.
+
+**View it at
+[rossoctl.github.io/eventing-lab/demos/…](https://rossoctl.github.io/eventing-lab/demos/2026-11-10-eventing-architecture-explainer.html),
+not from the repository file view.** GitHub serves repository HTML as
+`text/plain` with `X-Content-Type-Options: nosniff` — a deliberate anti-XSS measure — so an
+`.html` file in a repo can never execute from `github.com` or `raw.githubusercontent.com`.
+That is why this directory is published through GitHub Pages; see
+[`../index.html`](../index.html) for the landing page and `docs/.nojekyll` for why Jekyll is
+switched off.
+
+The seven markdown files are runbooks you read while typing, which is why they live here rather than in
 [`../notes/`](../notes/). `phase1-demo.md` covers all four ways to run it — locally without
 containers, under Docker, on Kind, and on OpenShift — `phase0-demo.md` is still the more
 detailed account of the laptop path, and `kubecon-na-2026-demo.md` is the signed path on Kind
@@ -74,6 +92,16 @@ If you add a demo, follow the shape of the existing ones:
 - **Be honest about limits.** A closing "Notes and limits" section naming what the demo does
   _not_ show is worth more than an extra act, because it is what stops someone
   over-promising in a room.
+
+If you add an **explainer** — a generated, self-contained HTML page rather than a runbook:
+
+- **Date-prefix the filename** (`YYYY-MM-DD-<slug>-explainer.html`). It is a snapshot of the
+  design at a moment, not a living document, and the date is how a reader knows whether to
+  trust it against today's code.
+- **One file, no build step and no local assets**, so it opens from a clone or an attachment.
+- **State the verification in the page footer** — which specs, which date, what was checked
+  against the code, and what drifted. An explainer that cannot say what it verified is a
+  diagram that teaches drift.
 
 ---
 
