@@ -62,6 +62,32 @@ Every overview, spec, ADR and report carries a `Status:` line drawn from:
 When a design is replaced, set the old document's status to `Superseded by <link>` rather
 than deleting it. The record of what we once thought, and why we changed, has value.
 
+## This directory is published with GitHub Pages
+
+`docs/` on `main` is served at
+**[rossoctl.github.io/eventing-lab](https://rossoctl.github.io/eventing-lab/)**.
+
+It exists for one reason: GitHub serves repository HTML as `text/plain` with
+`X-Content-Type-Options: nosniff`, a deliberate anti-XSS measure. So an `.html` file
+committed to a repo can never execute from `github.com` or `raw.githubusercontent.com` —
+the [interactive explainer](https://rossoctl.github.io/eventing-lab/demos/2026-11-10-eventing-architecture-explainer.html)
+needs a real web host to run, and Pages is the one that comes with the repo.
+(Its [source](demos/2026-11-10-eventing-architecture-explainer.html) is in-tree; that link
+shows you the markup, it does not run it.)
+
+Two files support this, and neither is decoration:
+
+- **`.nojekyll`** turns Jekyll off. With Jekyll on, the build would try to interpret
+  `{{ … }}` and `{% … %}` as Liquid templates — and two documents here legitimately contain
+  that syntax (`demos/phase1-demo.md` has Go template syntax in a `docker info --format`
+  call, and `specs/0004-…` documents a trigger template language that _is_ `{{dotted.path}}`).
+  Jekyll would either fail the build or silently blank those expressions.
+- **`index.html`** is the landing page, so the Pages root is not a 404. It links the
+  explainer and the recording, then points at GitHub for the markdown — which reads better
+  there, where the cross-links and tables render.
+
+Markdown in here is **not** written for Pages. Read it on GitHub.
+
 ## Conventions
 
 - **Spec filenames are dated and descriptive:** `YYYY-MM-DD-<topic>-design.md`. If the repo

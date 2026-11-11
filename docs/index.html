@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>eventing-lab — docs</title>
+<style>
+  :root{
+    --bg:#fff; --panel:#f7f8fa; --ink:#0b1220; --ink2:#49536b;
+    --line:#d7dce5; --accent:#1a4c96; --magenta:#d62293;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0b0f16; --panel:#121825; --ink:#eaeef6; --ink2:#9aa6bd;
+           --line:#283449; --accent:#6ea8ff; --magenta:#ff6ec7; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.6 "IBM Plex Sans",system-ui,-apple-system,sans-serif;}
+  .wrap{max-width:52rem;margin:0 auto;padding:3rem 1.25rem 4rem;}
+  .eyebrow{font:600 12px/1.4 "IBM Plex Mono",ui-monospace,monospace;
+    letter-spacing:.09em;color:var(--magenta);margin-bottom:.6rem;}
+  h1{font-size:2rem;letter-spacing:-.02em;margin:0 0 .75rem;}
+  p.lede{color:var(--ink2);margin:0 0 2rem;}
+  h2{font-size:1.05rem;margin:2.25rem 0 .75rem;}
+  ul{list-style:none;padding:0;margin:0;}
+  li{border:1px solid var(--line);background:var(--panel);border-radius:12px;
+    padding:.9rem 1.1rem;margin-bottom:.6rem;}
+  a{color:var(--accent);text-decoration:none;font-weight:600;}
+  a:hover{text-decoration:underline;}
+  .d{display:block;color:var(--ink2);font-weight:400;font-size:.9rem;margin-top:.2rem;}
+  code{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:.86em;}
+  footer{margin-top:2.5rem;padding-top:1.25rem;border-top:1px solid var(--line);
+    color:var(--ink2);font-size:.88rem;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="eyebrow">ROSSOCTL / EVENTING-LAB</div>
+  <h1>eventing-lab documentation</h1>
+  <p class="lede">
+    A Kafka message wakes a headless agent. The agent streams every step back out as
+    signed CloudEvents. KEDA scales the consumer from zero and back.
+  </p>
+
+  <h2>Start here</h2>
+  <ul>
+    <li>
+      <a href="demos/2026-11-10-eventing-architecture-explainer.html">The interactive explainer</a>
+      <span class="d">Walk the wire one message at a time. Four flows — one agent, a batch
+      of 100, a forged event, scale-to-zero — with each step's Kafka headers and data
+      payload.</span>
+    </li>
+    <li>
+      <a href="https://youtu.be/s6494nZZ-hM">Demo recording (YouTube)</a>
+      <span class="d">Zero replicas → signed task event wakes the agent → forged event
+      refused → completion chained back to the wake → back to zero.</span>
+    </li>
+    <li>
+      <a href="https://github.com/rossoctl/eventing-lab">The repository</a>
+      <span class="d">Source, specs, reports and runbooks. The code is the source of
+      truth for <em>how</em>.</span>
+    </li>
+  </ul>
+
+  <h2>The written docs</h2>
+  <p class="lede" style="margin-bottom:1rem">
+    These are markdown and read best on GitHub, where the cross-links and tables render.
+  </p>
+  <ul>
+    <li>
+      <a href="https://github.com/rossoctl/eventing-lab/blob/main/docs/README.md">Documentation index</a>
+      <span class="d">The router — it routes by intent and explains the lifecycle that
+      decides where a new document goes.</span>
+    </li>
+    <li>
+      <a href="https://github.com/rossoctl/eventing-lab/blob/main/docs/eventing-lab-overview.md">Overview</a>
+      <span class="d">Start here if you will not open the code: what each phase decided,
+      and what is built as opposed to designed.</span>
+    </li>
+    <li>
+      <a href="https://github.com/rossoctl/eventing-lab/tree/main/docs/specs">Specs</a>
+      <span class="d">The five phase designs — the wire contract, KEDA scaling, identity
+      on the event path, tenancy, enrollment.</span>
+    </li>
+    <li>
+      <a href="https://github.com/rossoctl/eventing-lab/tree/main/docs/reports">Reports</a>
+      <span class="d">What each phase actually built and measured, append-only — including
+      the seven bugs only a cluster could reach.</span>
+    </li>
+    <li>
+      <a href="https://github.com/rossoctl/eventing-lab/tree/main/docs/demos">Demos</a>
+      <span class="d">Runbooks you read while typing: local, Docker, Kind, OpenShift, and
+      the KubeCon run-of-show.</span>
+    </li>
+  </ul>
+
+  <footer>
+    <p>
+      <strong>The Seams Are the Trap: Agent Fleets from CNCF Parts You Already Have</strong><br>
+      KubeCon + CloudNativeCon NA · Thu 12 November 2026, 1:50–2:20 PM MST ·
+      Salt Palace, Level 2, Room 255 BC
+    </p>
+    <p>
+      This site is published from <code>docs/</code> on <code>main</code>. It exists so the
+      explainer renders — GitHub serves repository HTML as <code>text/plain</code>, so an
+      <code>.html</code> file in a repo can never run from the repo view.
+    </p>
+  </footer>
+
+</div>
+</body>
+</html>

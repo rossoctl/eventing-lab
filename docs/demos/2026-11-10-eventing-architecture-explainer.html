@@ -1,0 +1,1240 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>eventing-lab — the signed-event agent wake path</title>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#ffffff; --panel:#f7f8fa; --panel2:#eef1f5; --ink:#0b1220; --ink2:#49536b;
+    --line:#d7dce5; --accent:#1a4c96; --accent2:#052243;
+    --blue:#1a4c96; --teal:#0f8a7e; --amber:#b56b00; --red:#c0392b; --green:#1a7f4b;
+    --magenta:#d62293; --chip:#ffffff; --shadow:rgba(5,34,67,.10);
+  }
+  @media (prefers-color-scheme: dark){
+    :root[data-theme="auto"]{
+      --bg:#0b0f16; --panel:#121825; --panel2:#1a2230; --ink:#eaeef6; --ink2:#9aa6bd;
+      --line:#283449; --accent:#6ea8ff; --accent2:#adc5ef;
+      --blue:#6ea8ff; --teal:#3fd0c0; --amber:#f0b44a; --red:#ff7a6b; --green:#54d98c;
+      --magenta:#ff6ec7; --chip:#1a2230; --shadow:rgba(0,0,0,.5);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0b0f16; --panel:#121825; --panel2:#1a2230; --ink:#eaeef6; --ink2:#9aa6bd;
+    --line:#283449; --accent:#6ea8ff; --accent2:#adc5ef;
+    --blue:#6ea8ff; --teal:#3fd0c0; --amber:#f0b44a; --red:#ff7a6b; --green:#54d98c;
+    --magenta:#ff6ec7; --chip:#1a2230; --shadow:rgba(0,0,0,.5);
+  }
+  :root[data-theme="light"]{
+    --bg:#ffffff; --panel:#f7f8fa; --panel2:#eef1f5; --ink:#0b1220; --ink2:#49536b;
+    --line:#d7dce5; --accent:#1a4c96; --accent2:#052243;
+    --blue:#1a4c96; --teal:#0f8a7e; --amber:#b56b00; --red:#c0392b; --green:#1a7f4b;
+    --magenta:#d62293; --chip:#ffffff; --shadow:rgba(5,34,67,.10);
+  }
+  html,body{background:var(--bg);color:var(--ink);
+    font-family:'IBM Plex Sans',system-ui,-apple-system,sans-serif;}
+  .mono{font-family:'IBM Plex Mono',ui-monospace,monospace;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;}
+  .sub{color:var(--ink2);}
+  .btn{border:1px solid var(--line);background:var(--panel2);color:var(--ink);
+    border-radius:10px;padding:.5rem .9rem;font-weight:600;font-size:.875rem;
+    cursor:pointer;transition:.15s;}
+  .btn:hover:not(:disabled){border-color:var(--accent);}
+  .btn:disabled{opacity:.42;cursor:not-allowed;}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+  :root[data-theme="dark"] .btn-primary,
+  :root[data-theme="auto"] .btn-primary{color:#0b0f16;}
+  @media (prefers-color-scheme: light){:root[data-theme="auto"] .btn-primary{color:#fff;}}
+  .tab{border:1px solid var(--line);background:transparent;color:var(--ink2);
+    border-radius:999px;padding:.34rem .8rem;font-weight:600;font-size:.8rem;cursor:pointer;}
+  .tab[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:#fff;}
+  :root[data-theme="dark"] .tab[aria-selected="true"]{color:#0b0f16;}
+  .wire{background:var(--panel2);border-left:3px solid var(--accent);border-radius:8px;
+    padding:.7rem .9rem;}
+  .pay{background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+    padding:.6rem .75rem;overflow-x:auto;}
+  .pay pre{white-space:pre;color:var(--ink);}
+  .pay .k{color:var(--teal);}        /* attribute / json key */
+  .pay .v{color:var(--ink);}         /* value */
+  .pay .n{color:var(--amber);}       /* number */
+  .pay .hl{color:var(--magenta);font-weight:600;}  /* the attribute this step sets */
+  .pay .cm{color:var(--ink2);}       /* comment */
+  .chip{background:var(--chip);border:1px solid var(--line);border-radius:999px;
+    padding:.18rem .6rem;font-size:.75rem;font-weight:600;}
+  .dot{width:9px;height:9px;border-radius:999px;background:var(--line);
+    border:none;padding:0;cursor:pointer;}
+  .dot[aria-current="true"]{background:var(--accent);transform:scale(1.35);}
+  blockquote.dec{border-left:4px solid var(--magenta);background:var(--panel);
+    border-radius:0 12px 12px 0;}
+  canvas{display:block;width:100%;height:auto;}
+  a{color:var(--accent);}
+  .lg{display:inline-flex;align-items:center;gap:.4rem;font-size:.76rem;color:var(--ink2);font-weight:600;}
+  .sw{width:11px;height:11px;border-radius:3px;display:inline-block;}
+</style>
+</head>
+<body class="antialiased">
+<div class="max-w-6xl mx-auto px-5 py-9">
+
+  <header class="mb-7">
+    <div class="mono text-xs font-semibold tracking-wider mb-2" style="color:var(--magenta)">
+      EVENTING-LAB · SPEC 0001 PHASE 0 + 0002 PHASE 1 + 0003 PHASE 2 · KUBECON NA 2026
+    </div>
+    <h1 class="text-3xl sm:text-4xl font-bold mb-3" style="letter-spacing:-.02em">
+      The signed-event agent wake path
+    </h1>
+    <p class="sub text-[15px] leading-relaxed max-w-3xl">
+      A Kafka message wakes a headless agent. The agent streams every step back out as
+      CloudEvents. KEDA scales the consumer from zero and back. This page walks the wire,
+      one message at a time, and shows the event that travels on each step.
+      <strong style="color:var(--ink)">Press Next for one step. Press Prev to go back.
+      The wire box shows the messages of the current step, and the panel under it shows
+      that step's Kafka headers and data payload.</strong>
+      Four flows: one agent, a batch of a hundred, a forged event, and scale-to-zero as a
+      trust control.
+    </p>
+  </header>
+
+  <section class="card p-4 sm:p-5 mb-7" style="box-shadow:0 1px 3px var(--shadow)">
+    <div class="flex flex-wrap gap-x-5 gap-y-2 mb-3">
+      <span class="lg"><i class="sw" style="background:var(--blue)"></i>request / data</span>
+      <span class="lg"><i class="sw" style="background:var(--teal)"></i>control / config</span>
+      <span class="lg"><i class="sw" style="background:var(--amber)"></i>lifecycle / scaling</span>
+      <span class="lg"><i class="sw" style="background:var(--red)"></i>refusal / end</span>
+      <span class="lg"><i class="sw" style="background:var(--green)"></i>success / result</span>
+      <span class="lg"><i class="sw" style="background:var(--magenta)"></i>ours (2 services)</span>
+    </div>
+
+    <canvas id="stage" width="1000" height="640" aria-label="Communication diagram"></canvas>
+
+    <div class="flex flex-wrap items-center gap-2 mt-4 pt-4" style="border-top:1px solid var(--line)">
+      <div class="flex gap-1.5 mr-1" role="tablist" aria-label="Flow">
+        <button class="tab" id="tab0" role="tab" aria-selected="true">Wake path</button>
+        <button class="tab" id="tab1" role="tab" aria-selected="false">100 agents</button>
+        <button class="tab" id="tab2" role="tab" aria-selected="false">Forged event</button>
+        <button class="tab" id="tab3" role="tab" aria-selected="false">Scale to zero</button>
+      </div>
+      <button class="btn" id="prev">‹ Prev</button>
+      <button class="btn btn-primary" id="next">Next ›</button>
+      <button class="btn" id="play">▶ Play</button>
+      <div class="flex gap-1.5 items-center ml-1" id="dots"></div>
+      <span class="mono text-xs sub ml-auto" id="stepNum">1 / 1</span>
+    </div>
+
+    <div class="mt-4">
+      <h3 class="font-bold text-lg mb-2" id="stepTitle">—</h3>
+      <div class="wire mono text-[12.5px] leading-relaxed mb-3" id="stepWire"></div>
+
+      <div id="payloadWrap" class="mb-3" hidden>
+        <div class="flex items-center gap-2 mb-1.5">
+          <span class="mono text-[11px] font-semibold tracking-wider"
+                style="color:var(--ink2)">EVENT ON THE WIRE</span>
+          <span class="mono text-[11px]" id="payloadTopic" style="color:var(--magenta)"></span>
+        </div>
+        <div class="grid md:grid-cols-2 gap-2">
+          <div class="pay">
+            <div class="mono text-[10.5px] font-semibold mb-1"
+                 style="color:var(--ink2)">KAFKA HEADERS (binary mode)</div>
+            <pre class="mono text-[11.5px] leading-relaxed m-0" id="payloadHeaders"></pre>
+          </div>
+          <div class="pay">
+            <div class="mono text-[10.5px] font-semibold mb-1"
+                 style="color:var(--ink2)">DATA PAYLOAD</div>
+            <pre class="mono text-[11.5px] leading-relaxed m-0" id="payloadBody"></pre>
+          </div>
+        </div>
+      </div>
+
+      <p class="text-[14.5px] leading-relaxed mb-2" id="stepBody"></p>
+      <div class="flex flex-wrap gap-1.5" id="stepChips"></div>
+    </div>
+  </section>
+
+  <blockquote class="dec p-5 mb-7">
+    <p class="text-[15px] leading-relaxed mb-2">
+      <strong>Commit the Kafka offset after the terminal event, not when the message is read.</strong>
+      Consumer lag then means "work not finished", not "work not read".
+      KEDA scales on that lag, so the queue gauge and the agent lifetime are the same fact.
+      It is structurally impossible for KEDA to remove a pod mid-run.
+      One decision settles both "never miss an event" and "do not kill a running agent".
+    </p>
+    <p class="mono text-xs sub">
+      eventrunner/config.py:82 — commit_after_terminal: bool = True
+    </p>
+  </blockquote>
+
+  <div class="grid sm:grid-cols-2 gap-4 mb-7">
+
+    <div class="card p-5">
+      <h3 class="font-bold mb-3">Who signs what</h3>
+      <table class="w-full text-[13px]">
+        <thead><tr style="color:var(--ink2)" class="text-left mono text-[11px]">
+          <th class="pb-2">EVENT</th><th class="pb-2">SIGNED</th><th class="pb-2">RULE</th></tr></thead>
+        <tbody class="align-top">
+          <tr style="border-top:1px solid var(--line)"><td class="py-2 mono">request</td>
+            <td class="py-2" style="color:var(--green)">yes</td><td class="py-2 sub">EventBridge signs every wake</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td class="py-2 mono">response, final=true</td>
+            <td class="py-2" style="color:var(--green)">yes</td><td class="py-2 sub">the terminal event only</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td class="py-2 mono">response, intermediate</td>
+            <td class="py-2 sub">no</td><td class="py-2 sub">passed through by policy</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td class="py-2 mono">group.*</td>
+            <td class="py-2" style="color:var(--green)">yes</td><td class="py-2 sub">no <code>final</code> attribute, so treated as terminal</td></tr>
+        </tbody>
+      </table>
+      <p class="text-[12.5px] sub mt-3">
+        A signature proves who <em>finished</em> a run. It does not prove what the run said
+        along the way. <span class="mono">shared/signing.py:430 _is_terminal</span>
+      </p>
+      <p class="text-[12.5px] sub mt-2">
+        <strong style="color:var(--ink)">A group event carries no <span class="mono">final</span>
+        attribute at all.</strong> Testing <span class="mono">final</span> alone would class
+        it as an intermediate frame and wave it through — which is exactly the forged
+        <span class="mono">group.completed</span> that would end a live batch. It also
+        carries <span class="mono">groupid</span> and no <span class="mono">correlationid</span>,
+        so the responses consumer routes on <span class="mono">is_group_event</span> rather
+        than on the key. <span class="mono">shared/ce.py:121</span>
+      </p>
+    </div>
+
+    <div class="card p-5">
+      <h3 class="font-bold mb-3">Measured</h3>
+      <table class="w-full text-[13px]">
+        <thead><tr style="color:var(--ink2)" class="text-left mono text-[11px]">
+          <th class="pb-2"></th><th class="pb-2">OPENSHIFT</th><th class="pb-2">KIND</th></tr></thead>
+        <tbody>
+          <tr style="border-top:1px solid var(--line)"><td class="py-2">e2e assertions</td>
+            <td class="py-2 mono">49/49</td><td class="py-2 mono">37/37</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td class="py-2">POST → scale up</td>
+            <td class="py-2 mono">1.7–3.0 s</td><td class="py-2 mono">2.2–4.3 s</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td class="py-2">POST → pod Ready</td>
+            <td class="py-2 mono">~14 s</td><td class="py-2 mono">—</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td class="py-2">back to zero</td>
+            <td class="py-2 mono">22 s</td><td class="py-2 mono">—</td></tr>
+        </tbody>
+      </table>
+      <p class="text-[12.5px] sub mt-3">
+        3000 ms of the wake is the broker <span class="mono">group.initial.rebalance.delay.ms</span>.
+        It is not signing overhead. Kind sets it to 0, so Kind timings do not compare to
+        cluster timings.
+      </p>
+    </div>
+
+    <div class="card p-5">
+      <h3 class="font-bold mb-3">The batch of 100, measured</h3>
+      <table class="w-full text-[13px]">
+        <tbody>
+          <tr><td class="py-1.5">submitted</td><td class="py-1.5 mono">100 agents, one POST</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td class="py-1.5">finished / failed</td>
+            <td class="py-1.5 mono"><span style="color:var(--green)">100</span> / 0</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td class="py-1.5">wall clock</td>
+            <td class="py-1.5 mono">1m20s</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td class="py-1.5">slowest agent</td>
+            <td class="py-1.5 mono">79.6 s</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td class="py-1.5">peak replicas</td>
+            <td class="py-1.5 mono">10 — the cap, reached at t=6s</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td class="py-1.5">notifications</td>
+            <td class="py-1.5 mono">2 — not 100, not 102</td></tr>
+        </tbody>
+      </table>
+      <p class="text-[12.5px] sub mt-3">
+        KEDA does 0 → 1 and hands 1 → N to an HPA, whose <span class="mono">scaleUp</span>
+        policy here jumps straight to the cap instead of climbing. <strong style="color:var(--ink)">Partitions
+        are the real ceiling</strong> — Kafka gives each partition to one consumer in a
+        group, so <span class="mono">maxReplicaCount: 10</span> sits under the topic's 12.
+      </p>
+      <p class="text-[12.5px] sub mt-2">
+        While a group is open its members' own notifications are suppressed, keyed on
+        <em>membership</em> rather than on the group still being open — so a redelivered
+        request whose duplicate terminal arrives after completion stays quiet too.
+      </p>
+    </div>
+
+    <div class="card p-5">
+      <h3 class="font-bold mb-3">Two identities, one derivation</h3>
+      <p class="text-[13.5px] leading-relaxed mb-2">
+        Humans read <span class="mono">brave-otter-4718</span>. The agent CLI requires a
+        real UUID. So both services derive the session id from the correlation id:
+      </p>
+      <div class="wire mono text-[12px] mb-2">sessionuuid = uuid5(NAMESPACE, correlationid)</div>
+      <p class="text-[12.5px] sub">
+        No mapping table and no database read on the resume path. Both sides compute the
+        same answer from the slug alone.
+      </p>
+      <p class="text-[12.5px] mt-2" style="color:var(--amber)">
+        <strong>Drift:</strong> spec §2.3 prints the namespace as
+        <span class="mono">…-rossoctlkeda1</span>, which is not hexadecimal and raises
+        <span class="mono">ValueError</span>. The code uses
+        <span class="mono">…-000000000001</span> (shared/ce.py:19), and the spec's own
+        §6a.4 line 972 shows that correct value.
+      </p>
+    </div>
+
+    <div class="card p-5">
+      <h3 class="font-bold mb-3">Defaults that matter</h3>
+      <table class="w-full text-[13px]">
+        <thead><tr style="color:var(--ink2)" class="text-left mono text-[11px]">
+          <th class="pb-2">FLAG</th><th class="pb-2">DEFAULT</th></tr></thead>
+        <tbody>
+          <tr style="border-top:1px solid var(--line)"><td class="py-2 mono text-[11.5px]">ER_COMMIT_AFTER_TERMINAL</td>
+            <td class="py-2 mono" style="color:var(--green)">true</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td class="py-2 mono text-[11.5px]">ER_REQUIRE_SIGNATURE</td>
+            <td class="py-2 mono" style="color:var(--red)">false</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td class="py-2 mono text-[11.5px]">EB_AUTH_TOKENS</td>
+            <td class="py-2 mono" style="color:var(--red)">unset — open</td></tr>
+          <tr style="border-top:1px solid var(--line)"><td class="py-2 mono text-[11.5px]">ER_MAX_CONCURRENT</td>
+            <td class="py-2 mono">4</td></tr>
+        </tbody>
+      </table>
+      <p class="text-[12.5px] mt-3" style="color:var(--red)">
+        Enforcement is opt-in. An unconfigured deployment verifies nothing and accepts an
+        unauthenticated POST. The cluster run turned both on deliberately through the
+        <span class="mono">kind-signed</span> overlay.
+      </p>
+    </div>
+
+  </div>
+
+  <footer class="card p-5 text-[13px]">
+    <div class="flex flex-wrap gap-x-6 gap-y-2 mb-3">
+      <a href="https://github.com/rossoctl/eventing-lab">repository</a>
+      <a href="https://youtu.be/s6494nZZ-hM">demo recording</a>
+      <a href="https://github.com/rossoctl/eventing-lab/blob/main/docs/specs/0001-phase0-local-wire-contract.md">spec 0001 — wire contract</a>
+      <a href="https://github.com/rossoctl/eventing-lab/blob/main/docs/specs/0002-phase1-keda-kubernetes.md">spec 0002 — KEDA</a>
+      <a href="https://github.com/rossoctl/eventing-lab/blob/main/docs/specs/0003-phase2-identity-on-the-event-path.md">spec 0003 — identity</a>
+      <a href="https://github.com/rossoctl/eventing-lab/blob/main/docs/reports/phase2-cluster-run-report.md">cluster run report</a>
+    </div>
+    <p class="sub leading-relaxed">
+      <strong style="color:var(--ink)">Status: implemented and verified against the code on
+      2026-11-10.</strong>
+      Spec 0001 and 0002 are <span class="mono">Implemented</span>; the signed path of spec
+      0003 ran end to end on Kind with enforcement on in both directions. Every component,
+      wire name and flag on this page was read out of the source, not the spec alone.
+      Phase 3 tenancy is partial — <span class="mono">EB_TENANCY_MODE</span> defaults to
+      <span class="mono">single</span>. Phase 4 is design only.
+      Two drifts found and marked on the cards: the spec §2.3 namespace literal, and the
+      eight CloudEvent extensions that now exist beyond Phase 0's six.
+    </p>
+  </footer>
+
+</div>
+
+<script>
+(function(){
+'use strict';
+
+var cv = document.getElementById('stage');
+var ctx = cv.getContext('2d');
+var W = 1000, H = 640;
+
+function cssVar(n){
+  return getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+}
+var C = {};
+function readColors(){
+  C.bg=cssVar('--bg'); C.panel=cssVar('--panel'); C.panel2=cssVar('--panel2');
+  C.ink=cssVar('--ink'); C.ink2=cssVar('--ink2'); C.line=cssVar('--line');
+  C.blue=cssVar('--blue'); C.teal=cssVar('--teal'); C.amber=cssVar('--amber');
+  C.red=cssVar('--red'); C.green=cssVar('--green'); C.magenta=cssVar('--magenta');
+  C.chip=cssVar('--chip');
+}
+readColors();
+
+function fit(){
+  var w = cv.clientWidth || W;
+  var dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(w*dpr); cv.height = Math.round(w*(H/W)*dpr);
+  cv.style.height = 'auto';
+  ctx.setTransform(dpr*(w/W),0,0,dpr*(w/W),0,0);
+}
+
+/* ---------- geometry: left to right in message-flow order ---------- */
+var BOX = {
+  client : {x: 24,  y:120, w:150, h:74, label:'client',        sub:'curl / skill', ours:false},
+  bridge : {x:232,  y:120, w:160, h:74, label:'EventBridge',   sub:'HTTP front door', ours:true},
+  reqtop : {x:450,  y:120, w:150, h:74, label:'Kafka',         sub:'requests', ours:false},
+  runner : {x:658,  y:120, w:160, h:74, label:'EventRunner',   sub:'consumer', ours:true},
+  agent  : {x:876,  y:120, w:100, h:74, label:'agent',         sub:'claude -p', ours:false},
+  restop : {x:450,  y:330, w:150, h:74, label:'Kafka',         sub:'responses', ours:false},
+  store  : {x:232,  y:330, w:160, h:74, label:'EventBridge',   sub:'store + views', ours:true},
+  reader : {x:24,   y:330, w:150, h:74, label:'reader',        sub:'HTML / SSE', ours:false},
+  keda   : {x:658,  y:462, w:160, h:70, label:'KEDA',          sub:'ScaledObject', ours:false},
+  attacker:{x:876,  y:330, w:100, h:74, label:'attacker',      sub:'forges', ours:false}
+};
+function cx(b){return b.x+b.w/2;} function cy(b){return b.y+b.h/2;}
+
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath();
+}
+
+function drawBox(b, state){
+  var fill = C.panel, stroke = C.line, inkc = C.ink;
+  if(b.ours){ stroke = C.magenta; }
+  if(state === 'off'){ fill = C.bg; inkc = C.ink2; }
+  if(state === 'hot'){ fill = C.panel2; stroke = C.green; }
+  if(state === 'bad'){ fill = C.panel2; stroke = C.red; }
+  ctx.save();
+  ctx.lineWidth = (b.ours || state==='hot' || state==='bad') ? 2.2 : 1.2;
+  if(state === 'off'){ ctx.setLineDash([5,4]); }
+  roundRect(b.x,b.y,b.w,b.h,10);
+  ctx.fillStyle = fill; ctx.fill(); ctx.strokeStyle = stroke; ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = inkc;
+  ctx.font = '600 14px "IBM Plex Sans", sans-serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(b.label, cx(b), b.y+28);
+  ctx.fillStyle = C.ink2;
+  ctx.font = '400 11.5px "IBM Plex Mono", monospace';
+  ctx.fillText(b.sub, cx(b), b.y+50);
+  ctx.restore();
+}
+
+function path(pts, color, dashed, label){
+  ctx.save();
+  ctx.strokeStyle = color || C.line; ctx.lineWidth = 1.6;
+  if(dashed) ctx.setLineDash([6,5]);
+  ctx.beginPath(); ctx.moveTo(pts[0][0],pts[0][1]);
+  for(var i=1;i<pts.length;i++) ctx.lineTo(pts[i][0],pts[i][1]);
+  ctx.stroke(); ctx.setLineDash([]);
+  if(label){
+    var m = pts[Math.floor((pts.length-1)/2)], n = pts[Math.floor((pts.length-1)/2)+1] || m;
+    ctx.fillStyle = C.ink2; ctx.font='500 10.5px "IBM Plex Mono", monospace';
+    ctx.textAlign='center'; ctx.textBaseline='bottom';
+    ctx.fillText(label, (m[0]+n[0])/2, (m[1]+n[1])/2 - 5);
+  }
+  ctx.restore();
+}
+
+function chipAt(x,y,text,color){
+  ctx.save();
+  ctx.font='600 11px "IBM Plex Mono", monospace';
+  var w = ctx.measureText(text).width + 16, h = 21;
+  roundRect(x-w/2, y-h/2, w, h, 10);
+  ctx.fillStyle = C.chip; ctx.fill();
+  ctx.strokeStyle = color; ctx.lineWidth=1.6; ctx.stroke();
+  ctx.fillStyle = color; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(text, x, y);
+  ctx.restore();
+}
+
+/* Animation frame helpers, guarded. Browsers have both; a headless stub DOM may
+   provide requestAnimationFrame only, and an unguarded cancel then throws on load. */
+function raf_(fn){
+  if(typeof requestAnimationFrame === 'function') return requestAnimationFrame(fn);
+  return setTimeout(fn, 16);
+}
+function craf_(id){
+  if(typeof cancelAnimationFrame === 'function') return cancelAnimationFrame(id);
+  if(typeof clearTimeout === 'function') return clearTimeout(id);
+}
+
+function ease(t){ return t<.5 ? 2*t*t : -1+(4-2*t)*t; }
+function seg(t,a,b){ if(t<=a) return 0; if(t>=b) return 1; return (t-a)/(b-a); }
+function along(pts, t){
+  var total=0, segs=[], i;
+  for(i=1;i<pts.length;i++){
+    var d=Math.hypot(pts[i][0]-pts[i-1][0], pts[i][1]-pts[i-1][1]);
+    segs.push(d); total+=d;
+  }
+  var want = total*Math.max(0,Math.min(1,t)), acc=0;
+  for(i=0;i<segs.length;i++){
+    if(acc+segs[i] >= want){
+      var f = segs[i] ? (want-acc)/segs[i] : 0;
+      return [pts[i][0]+(pts[i+1][0]-pts[i][0])*f, pts[i][1]+(pts[i+1][1]-pts[i][1])*f];
+    }
+    acc+=segs[i];
+  }
+  return pts[pts.length-1].slice();
+}
+
+/* ---------- routed paths (around boxes, never through) ---------- */
+var P = {
+  c2b:[[BOX.client.x+BOX.client.w, cy(BOX.client)],[BOX.bridge.x, cy(BOX.bridge)]],
+  b2r:[[BOX.bridge.x+BOX.bridge.w, cy(BOX.bridge)],[BOX.reqtop.x, cy(BOX.reqtop)]],
+  r2n:[[BOX.reqtop.x+BOX.reqtop.w, cy(BOX.reqtop)],[BOX.runner.x, cy(BOX.runner)]],
+  n2a:[[BOX.runner.x+BOX.runner.w, cy(BOX.runner)],[BOX.agent.x, cy(BOX.agent)]],
+  a2n:[[cx(BOX.agent), BOX.agent.y+BOX.agent.h],[cx(BOX.agent), 240],
+       [cx(BOX.runner), 240],[cx(BOX.runner), BOX.runner.y+BOX.runner.h]],
+  n2res:[[cx(BOX.runner), BOX.runner.y+BOX.runner.h],[cx(BOX.runner), 290],
+         [cx(BOX.restop), 290],[cx(BOX.restop), BOX.restop.y]],
+  res2s:[[BOX.restop.x, cy(BOX.restop)],[BOX.store.x+BOX.store.w, cy(BOX.store)]],
+  s2rd:[[BOX.store.x, cy(BOX.store)],[BOX.reader.x+BOX.reader.w, cy(BOX.reader)]],
+  keda2req:[[cx(BOX.keda), BOX.keda.y],[cx(BOX.keda), 430],[cx(BOX.reqtop), 430],
+            [cx(BOX.reqtop), BOX.reqtop.y+BOX.reqtop.h]],
+  keda2n:[[BOX.keda.x+BOX.keda.w, cy(BOX.keda)],[930, cy(BOX.keda)],
+          [930, 230],[cx(BOX.runner)+40, 230],[cx(BOX.runner)+40, BOX.runner.y+BOX.runner.h]],
+  atk2res:[[BOX.attacker.x, cy(BOX.attacker)],[BOX.restop.x+BOX.restop.w, cy(BOX.restop)]]
+};
+
+/* ---------- scene ---------- */
+var S;
+function freshScene(){
+  S = { replicas:0, runnerOn:false, lag:0, signedReq:false, signedTerm:false,
+        stored:0, refused:false, bound:false, seq:0, tab:0, note:'',
+        group:false, expected:0, done:0 };
+}
+freshScene();
+
+function drawScene(){
+  ctx.save(); ctx.fillStyle = C.bg; ctx.fillRect(0,0,W,H); ctx.restore();
+
+  path(P.c2b, C.line, false, 'HTTP');
+  path(P.b2r, C.line, false, 'CloudEvent');
+  path(P.r2n, C.line, false, 'consume');
+  path(P.n2a, C.line, false, 'stdio');
+  path(P.a2n, C.line, true, 'stream-json');
+  path(P.n2res, C.line, false, 'publish');
+  path(P.res2s, C.line, false, 'consume');
+  path(P.s2rd, C.line, false, 'HTML / SSE');
+  path(P.keda2req, C.line, true, 'poll lag');
+  path(P.keda2n, C.line, true, 'scale 0..N');
+  if(S.tab === 2) path(P.atk2res, C.red, true, 'inject');
+
+  drawBox(BOX.client); drawBox(BOX.bridge); drawBox(BOX.reqtop);
+  drawBox(BOX.runner, S.runnerOn ? 'hot' : 'off');
+  drawBox(BOX.agent, S.runnerOn ? null : 'off');
+  drawBox(BOX.restop); drawBox(BOX.store); drawBox(BOX.reader); drawBox(BOX.keda);
+  if(S.tab === 2) drawBox(BOX.attacker, 'bad');
+
+  /* replica meter */
+  ctx.save();
+  ctx.font='600 11px "IBM Plex Mono", monospace'; ctx.textAlign='left'; ctx.textBaseline='middle';
+  ctx.fillStyle = C.ink2;
+  ctx.fillText('replicas', BOX.runner.x, BOX.runner.y-18);
+  /* 10 slots on the batch flow (the cap), 3 on the single-agent flows */
+  var slots = (S.tab === 1) ? 10 : 3;
+  var shown = (S.tab === 1 && S.replicas > 0) ? 10 : S.replicas;
+  for(var i=0;i<slots;i++){
+    var bx = BOX.runner.x+58+i*(slots>3?11:17);
+    roundRect(bx, BOX.runner.y-25, slots>3?8:13, 13, 3);
+    ctx.fillStyle = i < shown ? C.green : C.bg; ctx.fill();
+    ctx.strokeStyle = C.line; ctx.lineWidth=1.1; ctx.stroke();
+  }
+  ctx.fillStyle = C.ink2;
+  ctx.fillText('lag ' + S.lag, BOX.reqtop.x, BOX.reqtop.y-18);
+  if(S.stored){ ctx.fillText(S.stored + ' event(s) stored', BOX.store.x, BOX.store.y+BOX.store.h+18); }
+
+  /* group progress bar, batch flow only */
+  if(S.group && S.expected){
+    var gx = BOX.restop.x, gy = BOX.restop.y+BOX.restop.h+34, gw = 150;
+    ctx.fillStyle = C.ink2;
+    ctx.fillText('group ' + S.done + '/' + S.expected, gx, gy-10);
+    roundRect(gx, gy, gw, 9, 4);
+    ctx.fillStyle = C.bg; ctx.fill();
+    ctx.strokeStyle = C.line; ctx.lineWidth=1.1; ctx.stroke();
+    if(S.done){
+      roundRect(gx, gy, Math.max(4, gw*(S.done/S.expected)), 9, 4);
+      ctx.fillStyle = C.green; ctx.fill();
+    }
+  }
+  ctx.restore();
+
+  if(S.signedReq) chipAt(cx(BOX.reqtop), BOX.reqtop.y+BOX.reqtop.h+22, 'signed', C.green);
+  if(S.signedTerm) chipAt(cx(BOX.restop), BOX.restop.y-22, 'signed final', C.green);
+  if(S.bound) chipAt(cx(BOX.store), BOX.store.y-22, 'causationid ✓', C.green);
+  if(S.refused) chipAt(cx(BOX.restop)+140, cy(BOX.restop)+44, 'REFUSED', C.red);
+  if(S.note){
+    ctx.save();
+    ctx.fillStyle=C.ink2; ctx.font='500 12px "IBM Plex Mono", monospace';
+    ctx.textAlign='left'; ctx.textBaseline='top';
+    ctx.fillText(S.note, 24, 596); ctx.restore();
+  }
+}
+
+/* ---------- flows ---------- */
+function wakeSteps(){ return [
+  { title:'The client submits a prompt',
+    wire:['client → EventBridge: POST /v0/agents {"prompt":…,"max_turns":1}',
+          'EventBridge → client: 202 {"correlationid":"brave-otter-4718"}'],
+    body:'EventBridge mints a human-readable correlation id. It answers 202 at once. The run has not started yet.',
+    chips:['correlationid = brave-otter-4718','sessionuuid = uuid5(NAMESPACE, corr)'],
+    topic:'HTTP — not yet a CloudEvent',
+    headers:['Content-Type: application/json',
+             'Idempotency-Key: (optional)',
+             ['', null],
+             '# no ce_* headers yet. EventBridge builds the',
+             '# CloudEvent in the next step.'],
+    payload:['{', '  "prompt": "Name one animal starting with O.",',
+             '  "model": null,', '  "max_turns": 1,', '  "cwd": null', '}'],
+    dur:900,
+    commit:function(){ S.note='EventBridge stays at 1 replica by design. The agent is what scales.'; },
+    overlay:function(t){ chipAt.apply(null, along(P.c2b, ease(seg(t,0,.7))).concat(['POST', C.blue])); }
+  },
+  { title:'EventBridge signs the wake and publishes it',
+    wire:['EventBridge → Kafka:requests  ce_type=dev.rossoctl.agent.request.v1',
+          '  key=correlationid  ce_mode=start  ce_signature=<detached JWS>'],
+    body:'The event is a binary-mode CloudEvent. Attributes ride Kafka headers as ce_*. The Kafka key is the correlation id, so every event for one conversation lands on one partition.',
+    chips:['binary content mode','Ed25519 detached JWS','key = correlationid'],
+    topic:'kafka: requests',
+    headers:['ce_specversion: 1.0',
+             'ce_type: dev.rossoctl.agent.request.v1',
+             'ce_source: rossoctl://eventbridge/local',
+             'ce_id: 9f2c1e84-… (UUIDv4)',
+             'ce_time: 2026-11-10T18:04:11Z',
+             'ce_datacontenttype: application/json',
+             'ce_subject: name one animal',
+             'ce_correlationid: brave-otter-4718',
+             'ce_sessionuuid: 3b1f…-5000-a000-… (uuid5)',
+             ['ce_mode: start', 'hl'],
+             ['ce_signature: eyJhbGciOiJFZERTQSIsImtpZCI6…', 'hl'],
+             ['ce_submitter: mrsabath', 'hl'],
+             ['', null],
+             '# kafka key = "brave-otter-4718"'],
+    payload:['{', '  "prompt": "Name one animal starting with O.",',
+             '  "model": null,', '  "max_turns": 1,', '  "cwd": null', '}'],
+    dur:1000,
+    commit:function(){ S.signedReq=true; S.lag=1;
+      S.note='Lag is 1. The offset is not committed yet — that waits for the terminal event.'; },
+    overlay:function(t){ chipAt.apply(null, along(P.b2r, ease(seg(t,0,.8))).concat(['request.v1', C.blue])); }
+  },
+  { title:'KEDA sees the lag and scales from zero',
+    wire:['KEDA → Kafka: describe consumer group "eventrunner"  → lag = 1',
+          'KEDA → Deployment/eventrunner: replicas 0 → 1'],
+    body:'KEDA polls consumer lag. Lag of 1 means one unit of unfinished work. It raises the replica count. The consumer group name must equal the ScaledObject trigger, or KEDA measures a group nobody joins.',
+    chips:['pollingInterval: 5','minReplicaCount: 0','wake 2.1–4.2 s'],
+    topic:'control plane — no CloudEvent on this step',
+    headers:['ScaledObject/eventrunner',
+             '  minReplicaCount: 0',
+             '  pollingInterval: 5',
+             '  cooldownPeriod: 5',
+             '  trigger: kafka',
+             '    topic: kev1-requests',
+             '    lagThreshold: 1',
+             ['    consumerGroup: eventrunner', 'hl'],
+             ['', null],
+             '# must equal ER_CONSUMER_GROUP exactly, or KEDA',
+             '# measures a group nobody joins — a silent no-scale.'],
+    payload:['the wake, decomposed:',
+             '',
+             'POST ─1.7s─▶ KEDA decides to scale',
+             '     ─14s──▶ pod Ready   (image pull + CPython init)',
+             '     ─22s──▶ back to zero (after the run finished)',
+             '',
+             '# 3000 ms of it is the broker’s',
+             '# group.initial.rebalance.delay.ms — NOT signing cost.'],
+    dur:1100,
+    commit:function(){ S.replicas=1; S.runnerOn=true;
+      S.note='3000 ms of the wake is the broker rebalance delay, not signing cost.'; },
+    overlay:function(t){
+      chipAt.apply(null, along(P.keda2req, ease(seg(t,0,.45))).concat(['lag?', C.amber]));
+      if(t>.5) chipAt.apply(null, along(P.keda2n, ease(seg(t,.5,1))).concat(['scale 1', C.amber]));
+    }
+  },
+  { title:'EventRunner verifies the signature, then the allowlist',
+    wire:['EventRunner: verify_request(event) → ok',
+          'EventRunner: ce_submitter ∈ ER_ALLOWED_SUBMITTERS → ok'],
+    body:'The order is the control. A signature is what makes ce_submitter trustworthy. Check the allowlist first and you filter on a value the attacker chose.',
+    chips:['signature before allowlist','ER_REQUIRE_SIGNATURE (default false)'],
+    topic:'kafka: requests — the event being checked',
+    headers:[['ce_signature: eyJhbGciOiJFZERTQSIsImtpZCI6…', 'hl'],
+             '  ↳ verify over SIGNED_ATTRS + payload digest',
+             '  ↳ kid looked up in the approved keyset',
+             ['ce_submitter: mrsabath', 'hl'],
+             '  ↳ only trusted BECAUSE the signature covers it',
+             ['', null],
+             '# signed attrs: specversion, type, source, id,',
+             '#   time, subject, correlationid, sessionuuid, mode'],
+    payload:['verify_request(event, cfg, keyset)',
+             '  → (True, "ok")',
+             '',
+             'submitter in ER_ALLOWED_SUBMITTERS',
+             '  → accept'],
+    dur:850,
+    commit:function(){ S.note='Enforcement is opt-in. Unconfigured, this step verifies nothing.'; },
+    overlay:function(t){ chipAt.apply(null, along(P.r2n, ease(seg(t,0,.8))).concat(['verify', C.teal])); }
+  },
+  { title:'EventRunner spawns the agent',
+    wire:['EventRunner → claude -p --output-format stream-json',
+          '  --session-id uuid5(NAMESPACE, correlationid)'],
+    body:'The agent CLI requires a real UUID, so the runner derives one from the correlation id. No mapping table is read. A continue turn passes --resume with the same derived id.',
+    chips:['one slot per correlationid','ER_MAX_CONCURRENT = 4'],
+    topic:'subprocess — no CloudEvent on this step',
+    headers:['claude -p',
+             '  --output-format stream-json',
+             ['  --session-id 3b1f…   # uuid5(NAMESPACE, corr)', 'hl'],
+             '  --max-turns 1',
+             '',
+             '# a /continue turn passes --resume with the SAME',
+             '# derived id, so the session is picked up again.'],
+    payload:['NAMESPACE = uuid.UUID(',
+             '  "6e5f8a90-0000-5000-a000-000000000001")',
+             '',
+             'session_uuid("brave-otter-4718")',
+             '  → "3b1f…"',
+             '',
+             '# both services derive this independently.',
+             '# No mapping table, no DB read on the resume path.'],
+    dur:800,
+    commit:function(){ S.note='Turns are FIFO per conversation and parallel across conversations.'; },
+    overlay:function(t){ chipAt.apply(null, along(P.n2a, ease(seg(t,0,.8))).concat(['spawn', C.blue])); }
+  },
+  { title:'Each output frame becomes a response event',
+    wire:['agent → EventRunner: stream-json frame',
+          'EventRunner → Kafka:responses  ce_phase=stdout  ce_sequence=1  ce_final=false'],
+    body:'Intermediate frames are not signed. That is the policy, not a gap: signing every frame would add minutes to a chatty run. Sequence numbers are monotonic per correlation id.',
+    chips:['phase = stdout','final = false','unsigned by policy'],
+    topic:'kafka: responses',
+    headers:['ce_type: dev.rossoctl.agent.response.v1',
+             'ce_source: rossoctl://eventrunner/local',
+             'ce_correlationid: brave-otter-4718   # echoes request',
+             'ce_sessionuuid: 3b1f…                # echoes request',
+             ['ce_sequence: 1', 'hl'],
+             ['ce_phase: stdout', 'hl'],
+             ['ce_final: false', 'hl'],
+             ['', null],
+             '# no ce_signature — unsigned by policy'],
+    payload:['{', '  "type": "assistant",', '  "role": "assistant",',
+             '  "text": "An otter.",',
+             '  "raw": { … full stream-json frame … }', '}',
+             '',
+             '# data.text is TOP LEVEL on every response event,',
+             '# so a reply never means walking into',
+             '# data.raw.message.content[0].text'],
+    dur:1000,
+    commit:function(){ S.seq=1; S.stored=1;
+      S.note='An unsigned intermediate frame is accepted. An unsigned terminal is refused.'; },
+    overlay:function(t){
+      chipAt.apply(null, along(P.a2n, ease(seg(t,0,.5))).concat(['frame', C.blue]));
+      if(t>.5) chipAt.apply(null, along(P.n2res, ease(seg(t,.5,1))).concat(['seq 1', C.blue]));
+    }
+  },
+  { title:'The terminal event is signed and bound to the wake',
+    wire:['EventRunner → Kafka:responses  ce_phase=result  ce_final=true',
+          '  ce_causationid=<id of the request event>  ce_signature=<JWS>'],
+    body:'The last event carries the causation id of the wake that caused it. The audit trail is a chain, not a list. This event is signed, so the chain has a verifiable end.',
+    chips:['phase = result','final = true','causationid → request id'],
+    topic:'kafka: responses — the terminal event',
+    headers:['ce_type: dev.rossoctl.agent.response.v1',
+             'ce_correlationid: brave-otter-4718',
+             'ce_sequence: 2',
+             ['ce_phase: result', 'hl'],
+             ['ce_final: true', 'hl'],
+             ['ce_causationid: 9f2c1e84-…   # = ce_id of the wake', 'hl'],
+             ['ce_signature: eyJhbGciOiJFZERTQSIsImtpZCI6…', 'hl'],
+             ['', null],
+             '# signed BECAUSE final=true (shared/signing.py:430)'],
+    payload:['{', '  "type": "result",', '  "role": "final",',
+             '  "text": null,                    # deduped echo',
+             '  "text_echoes_prior_assistant": true,',
+             '  "stats": {',
+             '    "num_turns": 1,', '    "duration_ms": 2140,',
+             '    "total_cost_usd": 0.0,', '    "is_error": false',
+             '  }', '}',
+             '',
+             '# the CLI emits the last reply twice. The duplicate',
+             '# is stripped unless ER_DEDUPE_FINAL_TEXT=false'],
+    dur:1050,
+    commit:function(){ S.signedTerm=true; S.seq=2; S.stored=2; S.bound=true;
+      S.note='A signature proves who finished the run. It does not prove what it said along the way.'; },
+    overlay:function(t){ chipAt.apply(null, along(P.n2res, ease(seg(t,0,.85))).concat(['final ✓', C.green])); }
+  },
+  { title:'EventBridge stores the events and serves the transcript',
+    wire:['EventBridge ← Kafka:responses: consume',
+          'reader → EventBridge: GET /v0/agents/{corr}  → HTML + SSE'],
+    body:'EventBridge consumes its own response topic and writes to SQLite. The reader gets a live transcript. Every event carries data.text at the top level, so a reply never means walking into nested JSON.',
+    chips:['/v0/agents/{corr}','events.jsonl','events.sse'],
+    topic:'HTTP — reading the stored events back',
+    headers:['GET /v0/agents/brave-otter-4718',
+             '  → live HTML transcript, turn-grouped, SSE-backed',
+             'GET /v0/agents/brave-otter-4718/events.jsonl',
+             '  → raw CloudEvents as ndjson',
+             'GET /v0/agents/brave-otter-4718/turns',
+             '  → prompt paired with reply, plus cost/duration'],
+    payload:['store: (correlationid, sequence) PRIMARY KEY',
+             '',
+             '  brave-otter-4718  seq 1  stdout  final=false',
+             '  brave-otter-4718  seq 2  result  final=true ✓signed',
+             '',
+             '# the primary key is why a group event — which has',
+             '# no correlationid — must not reach insert_response.'],
+    dur:1000,
+    commit:function(){ S.stored=2; S.note='data.text is top level on every response event.'; },
+    overlay:function(t){
+      chipAt.apply(null, along(P.res2s, ease(seg(t,0,.5))).concat(['events', C.green]));
+      if(t>.5) chipAt.apply(null, along(P.s2rd, ease(seg(t,.5,1))).concat(['transcript', C.green]));
+    }
+  },
+  { title:'The offset commits, lag returns to zero, KEDA removes the replica',
+    wire:['EventRunner → Kafka: commit offset  (after terminal only)',
+          'KEDA → Deployment/eventrunner: replicas 1 → 0'],
+    body:'The offset commits only now. For the whole run the lag stayed at 1, so KEDA could not remove a working pod. Idle costs nothing.',
+    chips:['cooldownPeriod: 5 → 22 s','0 replicas at rest'],
+    topic:'control plane — the decision this design rests on',
+    headers:['ER_COMMIT_AFTER_TERMINAL = true   # the default',
+             '',
+             'during the run:   lag = 1   (offset uncommitted)',
+             'after terminal:   commit → lag = 0',
+             '',
+             '# eventrunner/config.py:82',
+             '# eventrunner/consume.py:337'],
+    payload:['the alternative, and why it is wrong:',
+             '',
+             'commit on read  → lag 0 while the agent still works',
+             '                → KEDA sees an empty queue',
+             '                → KEDA removes the working pod',
+             '',
+             '# so "never miss an event" and "do not kill a',
+             '# running agent" are the same fix.'],
+    dur:1100,
+    commit:function(){ S.lag=0; S.replicas=0; S.runnerOn=false;
+      S.note='One decision: lag means unfinished work, and a running agent cannot be scaled away.'; },
+    overlay:function(t){
+      chipAt.apply(null, along(P.n2res, 0).concat(['commit', C.amber]));
+      if(t>.4) chipAt.apply(null, along(P.keda2n, 1-ease(seg(t,.4,1))).concat(['scale 0', C.amber]));
+    }
+  }
+];}
+
+function batchSteps(){ return [
+  { title:'One command submits a batch of 100',
+    wire:['client → EventBridge: POST /v0/groups',
+          '  {"label":"hello-100-demo","prompts":[… 100 strings …]}',
+          'EventBridge → client: 202 {"groupid":"bold-hornet-2962"}'],
+    body:'The request carries a flat list of prompts, not member objects. EventBridge mints one group id and answers once. An Idempotency-Key makes a retried POST return the same group rather than launching a second batch.',
+    chips:['prompts[] — flat strings','Idempotency-Key honoured','expected = 100'],
+    topic:'HTTP — the batch request',
+    headers:['Content-Type: application/json',
+             'Idempotency-Key: hello-100-demo-run1',
+             ['', null],
+             '# a retried POST with the same key returns the',
+             '# SAME group. It does not launch a second batch.'],
+    payload:['{', '  "label": "hello-100-demo",',
+             '  "prompts": ["Say Hello 1", "Say Hello 2", …,',
+             '              "Say Hello 100"],',
+             '  "max_turns": 3', '}',
+             '',
+             '# `expected` is derived from len(prompts) and is',
+             '# rejected if it contradicts it.'],
+    dur:950,
+    setup:function(){ S.tab=1; },
+    commit:function(){ S.tab=1; S.group=true; S.expected=100;
+      S.note='CLI: group run --template "Say Hello {n}" --count 100'; },
+    overlay:function(t){ chipAt.apply(null, along(P.c2b, ease(seg(t,0,.7))).concat(['100 prompts', C.blue])); }
+  },
+  { title:'EventBridge publishes group.started, then fans out 100 wakes',
+    wire:['EventBridge → Kafka:responses  ce_type=…group.started.v1',
+          'EventBridge → Kafka:requests   ×100  key=<each correlationid>'],
+    body:'The group lifecycle event goes to the responses topic. The 100 member wakes go to the requests topic, each keyed by its own correlation id, so they spread across the partitions.',
+    chips:['1 group.started','100 request events','ntfy: 1 notification'],
+    topic:'kafka: responses — group.started.v1',
+    headers:['ce_type: dev.rossoctl.agent.group.started.v1',
+             ['ce_groupid: bold-hornet-2962', 'hl'],
+             'ce_subject: group-started',
+             ['ce_signature: eyJhbGciOiJFZERTQSIs…', 'hl'],
+             ['', null],
+             '# NOTE: no ce_correlationid and no ce_final.',
+             '# A group event carries groupid instead — which is',
+             '# why is_group_event() must classify it terminal.'],
+    payload:['{', '  "label": "hello-100-demo",',
+             '  "expected": 100,', '  "min_success": null,',
+             '  "deadline_utc": null', '}',
+             '',
+             '# eventbridge/group_service.py:78 _publish_started'],
+    dur:1050,
+    setup:function(){ S.tab=1; },
+    commit:function(){ S.tab=1; S.group=true; S.expected=100; S.lag=100; S.signedReq=true;
+      S.note='While a group is open, its members’ own notifications are suppressed.'; },
+    overlay:function(t){
+      chipAt.apply(null, along(P.n2res, 1-ease(seg(t,0,.4))).concat(['group.started', C.teal]));
+      if(t>.35) chipAt.apply(null, along(P.b2r, ease(seg(t,.35,1))).concat(['×100 wakes', C.blue]));
+    }
+  },
+  { title:'KEDA jumps straight to the replica cap',
+    wire:['KEDA → Kafka: lag = 100',
+          'KEDA → HPA → Deployment/eventrunner: replicas 0 → 10'],
+    body:'KEDA handles zero to one. It delegates one to N to an HPA. The explicit scaleUp policy reaches the cap in one step instead of climbing over thirty seconds.',
+    chips:['t=6s → replicas 10','maxReplicaCount: 10','behavior.scaleUp'],
+    topic:'control plane — no CloudEvent',
+    headers:['ScaledObject/eventrunner',
+             '  minReplicaCount: 0',
+             '  maxReplicaCount: 10          # under 12 partitions',
+             '  pollingInterval: 5',
+             '  trigger: kafka  lagThreshold: 1',
+             '  consumerGroup: eventrunner   # must match ER_CONSUMER_GROUP'],
+    payload:['measured on ykt1:',
+             '',
+             't=6s    replicas=10            # cap in one step',
+             't=12s   replicas=10 running=1',
+             't=30s   replicas=10 running=8',
+             't=33s   replicas=0             # the batch drained'],
+    dur:1150,
+    setup:function(){ S.tab=1; },
+    commit:function(){ S.tab=1; S.group=true; S.expected=100; S.lag=100;
+      S.replicas=3; S.runnerOn=true; S.signedReq=true;
+      S.note='Partitions are the real ceiling: Kafka gives each partition to one consumer.'; },
+    overlay:function(t){
+      chipAt.apply(null, along(P.keda2req, ease(seg(t,0,.4))).concat(['lag 100', C.amber]));
+      if(t>.45) chipAt.apply(null, along(P.keda2n, ease(seg(t,.45,1))).concat(['scale 10', C.amber]));
+    }
+  },
+  { title:'Ten pods drain the backlog in parallel',
+    wire:['EventRunner ×10: consume → verify → spawn agent',
+          'EventRunner ×10 → Kafka:responses  ce_correlationid=<per member>'],
+    body:'Each pod takes whole partitions. Turns are FIFO within one correlation id and parallel across them, so one hundred independent conversations never interleave.',
+    chips:['12 partitions','10 replicas','ER_MAX_CONCURRENT = 4 per pod'],
+    topic:'kafka: responses — one member terminal',
+    headers:['ce_type: dev.rossoctl.agent.response.v1',
+             ['ce_correlationid: fresh-mole-0029', 'hl'],
+             ['ce_groupid: bold-hornet-2962      # member → group', 'hl'],
+             'ce_sequence: 2',
+             'ce_phase: result',
+             ['ce_final: true', 'hl'],
+             'ce_causationid: <id of that member’s wake>',
+             'ce_signature: eyJhbGciOiJFZERTQSIs…'],
+    payload:['{', '  "type": "result",', '  "role": "final",',
+             '  "text": "Hello 29",',
+             '  "stats": { "num_turns": 1, "duration_ms": 1980 }', '}',
+             '',
+             '# ×100, one per member, each on its own',
+             '# correlationid partition'],
+    dur:1100,
+    setup:function(){ S.tab=1; },
+    commit:function(){ S.tab=1; S.group=true; S.expected=100; S.replicas=3;
+      S.runnerOn=true; S.lag=40; S.done=41; S.signedReq=true; S.signedTerm=true; S.stored=41;
+      S.note='41/100 done · 16 running · 43 queued · 45s elapsed'; },
+    overlay:function(t){
+      chipAt.apply(null, along(P.r2n, ease(seg(t,0,.45))).concat(['consume ×10', C.blue]));
+      if(t>.4) chipAt.apply(null, along(P.n2res, ease(seg(t,.4,1))).concat(['results', C.green]));
+    }
+  },
+  { title:'The group completes, and sends the second notification',
+    wire:['EventBridge: 100 member terminals seen → expected reached',
+          'EventBridge → Kafka:responses  ce_type=…group.completed.v1',
+          'EventBridge → ntfy: "group hello-100-demo · 100 done"'],
+    body:'EventBridge counts member terminals against the expected total. A batch sends exactly two notifications whatever its size: one at the start, one at the end.',
+    chips:['2 notifications, not 100','0 failed','1m20s'],
+    topic:'kafka: responses — group.completed.v1',
+    headers:['ce_type: dev.rossoctl.agent.group.completed.v1',
+             ['ce_groupid: bold-hornet-2962', 'hl'],
+             'ce_subject: group-completed',
+             ['ce_signature: eyJhbGciOiJFZERTQSIs…', 'hl'],
+             ['', null],
+             '# again: no ce_final. Signed because a forged',
+             '# group.completed would otherwise end a live batch.'],
+    payload:['{', '  "label": "hello-100-demo",',
+             '  "reason": "all",',
+             '  "finished": 100,', '  "failed": 0,',
+             '  "expected": 100,', '  "members": 100,',
+             '  "elapsed_s": 80.4,', '  "elapsed": "1m20s",',
+             '  "slowest_member_s": 79.6', '}',
+             '',
+             '# eventbridge/group_service.py:245'],
+    dur:1100,
+    setup:function(){ S.tab=1; },
+    commit:function(){ S.tab=1; S.group=true; S.expected=100; S.done=100;
+      S.lag=0; S.replicas=0; S.runnerOn=false; S.signedTerm=true; S.stored=100; S.bound=true;
+      S.note='✔ group complete · 100 finished · 0 failed · 1m20s · back to 0 replicas'; },
+    overlay:function(t){
+      chipAt.apply(null, along(P.n2res, 1-ease(seg(t,0,.45))).concat(['group.completed', C.teal]));
+      if(t>.4) chipAt.apply(null, along(P.res2s, ease(seg(t,.4,.8))).concat(['100/100', C.green]));
+      if(t>.8) chipAt(cx(BOX.store), BOX.store.y+BOX.store.h+44, 'ntfy ×2 total', C.green);
+    }
+  }
+];}
+
+function forgedSteps(){ return [
+  { title:'An attacker injects a response directly into Kafka',
+    wire:['attacker → Kafka:responses  ce_phase=error  ce_final=true',
+          '  ce_signature absent   source=rossoctl://attacker/forge'],
+    body:'The attacker reaches the broker and writes a terminal event. It claims the run failed. It carries no signature, because the attacker holds no approved key.',
+    chips:['final = true','no signature','terminal by claim'],
+    topic:'kafka: responses — the forgery',
+    headers:['ce_type: dev.rossoctl.agent.response.v1',
+             ['ce_source: rossoctl://attacker/forge', 'hl'],
+             'ce_correlationid: brave-otter-4718   # a real run',
+             'ce_sequence: 9001                    # not 1 — see below',
+             'ce_phase: error',
+             ['ce_final: true', 'hl'],
+             ['ce_signature: — ABSENT —', 'hl'],
+             ['', null],
+             '# a forgery at sequence=1 would collide with the',
+             '# genuine run’s first event, so the demo uses a high',
+             '# number to prove refusal and not a key conflict.'],
+    payload:['{', '  "type": "result",', '  "role": "final",',
+             '  "text": "FORGERY-EXECUTED: an unsigned request',
+             '           reached the agent."', '}',
+             '',
+             '# well formed. It decodes cleanly.',
+             '# Only the signature is missing.'],
+    dur:950,
+    setup:function(){ S.tab=2; },
+    commit:function(){ S.tab=2; S.note='The forgery is well formed. It decodes. Only the signature is missing.'; },
+    overlay:function(t){ chipAt.apply(null, along(P.atk2res, ease(seg(t,0,.8))).concat(['forged', C.red])); }
+  },
+  { title:'EventBridge refuses it and the event stays inert',
+    wire:['EventBridge: response_decision(event, keyset, require=true)',
+          '  → (False, "signature missing on terminal event")'],
+    body:'A terminal event must be signed. An unsigned terminal is refused. The forged event is never stored and never shown in a transcript.',
+    chips:['_is_terminal → true','refused','not stored'],
+    topic:'the decision, not an event',
+    headers:['_is_terminal(event)',
+             '  → str(event["final"]).lower() == "true"',
+             '  → True',
+             '',
+             'signature required → event["signature"] is None',
+             '  → REFUSE'],
+    payload:['response_decision(event, keyset, require=True)',
+             '  → (False, "signature missing on terminal event")',
+             '',
+             '# not stored. Not shown in any transcript.',
+             '# The audit tool reports it as an ORPHAN chain:',
+             '# a terminal with no verifiable wake behind it.'],
+    dur:900,
+    setup:function(){ S.tab=2; },
+    commit:function(){ S.tab=2; S.refused=true;
+      S.note='shared/signing.py — response_decision refuses an unsigned terminal.'; },
+    overlay:function(t){ chipAt(cx(BOX.store)+60, cy(BOX.restop), 'verify ✗', C.red); }
+  },
+  { title:'A group event has no final attribute, and is still treated as terminal',
+    wire:['attacker → Kafka:responses  ce_type=…group.completed.v1',
+          'EventBridge: is_group_event → terminal → signature required → refused'],
+    body:'A group lifecycle event carries no final attribute at all. Testing final alone would class it as an intermediate frame and wave it through. That is the forged group.completed this rule catches.',
+    chips:['group.* always signed','EB_SIGNING_KID pinned'],
+    topic:'kafka: responses — forged group.completed.v1',
+    headers:['ce_type: dev.rossoctl.agent.group.completed.v1',
+             'ce_groupid: bold-hornet-2962   # a live batch',
+             ['ce_final: — ABSENT —', 'hl'],
+             ['ce_signature: — ABSENT —', 'hl'],
+             ['', null],
+             '# final is absent, so a final-only test would call',
+             '# this an intermediate frame and accept it.',
+             '# is_group_event() classifies it terminal instead.'],
+    payload:['{', '  "label": "hello-100-demo",',
+             '  "reason": "all",',
+             '  "finished": 100, "failed": 0', '}',
+             '',
+             '# accepting this would END a batch that is still',
+             '# running, and report 100 successes that never ran.'],
+    dur:950,
+    setup:function(){ S.tab=2; },
+    commit:function(){ S.tab=2; S.refused=true;
+      S.note='The control held on a cluster: a forged response was refused and inert.'; },
+    overlay:function(t){ chipAt.apply(null, along(P.atk2res, ease(seg(t,0,.6))).concat(['group.completed', C.red])); }
+  }
+];}
+
+function zeroSteps(){ return [
+  { title:'At rest the agent runs nowhere',
+    wire:['Deployment/eventrunner: replicas = 0',
+          'Kafka: consumer group lag = 0'],
+    body:'No pod exists. No process holds a policy it read at startup. Idle capacity costs nothing.',
+    chips:['minReplicaCount: 0','Active = False'],
+    topic:'cluster state — nothing on the wire',
+    headers:['Deployment/eventrunner  replicas: 0',
+             'ScaledObject/eventrunner',
+             '  Ready:  True',
+             '  Active: False      # no lag, nothing to do',
+             '',
+             'Deployment/eventbridge  replicas: 1   # by design'],
+    payload:['$ kubectl -n kev1 get pods -l \\',
+             '    app.kubernetes.io/name=eventrunner',
+             'No resources found.',
+             '',
+             '# EventBridge stays at 1. It is the front door.',
+             '# Only the agent scales to zero.'],
+    dur:750,
+    commit:function(){ S.replicas=0; S.runnerOn=false; S.lag=0;
+      S.note='EventBridge stays at 1 replica. Only the agent scales.'; },
+    overlay:function(t){ chipAt(cx(BOX.runner), cy(BOX.runner)+58, 'no pod', C.ink2); }
+  },
+  { title:'The operator edits the egress allowlist while replicas are zero',
+    wire:['operator → ConfigMap/eventing-config: ER_ALLOWED_SUBMITTERS=…'],
+    body:'The runner reads its allowlist at startup. With no runner alive, no stale decision is held anywhere. The edit needs no rollout.',
+    chips:['read at startup','no long-lived cache'],
+    topic:'config — no CloudEvent on this step',
+    headers:['ConfigMap/eventing-config',
+             ['  ER_ALLOWED_SUBMITTERS: "mrsabath,aslom"', 'hl'],
+             '',
+             '# read ONCE, at process start.',
+             '# With 0 replicas there is no process to hold the',
+             '# old value, so no rollout and no cache to bust.'],
+    payload:['the drift window, by deployment style:',
+             '',
+             'always-on pool  → bounded by redeploy cadence',
+             'scale-to-zero   → bounded by the longest single run',
+             '',
+             '# we adopted scale-to-zero to save money.',
+             '# It shrank a security window as a side effect.'],
+    dur:800,
+    commit:function(){ S.note='Scale-to-zero shrinks the drift window. The autoscaler became a trust control.'; },
+    overlay:function(t){ chipAt(cx(BOX.runner), BOX.runner.y-54, 'new policy', C.teal); }
+  },
+  { title:'The next wake enforces the new list',
+    wire:['Kafka:requests lag 0 → 1',
+          'KEDA: replicas 0 → 1   EventRunner: load allowlist → enforce'],
+    body:'The new pod reads the current list. The old one does not exist to disagree. The limit is honest: a run already in flight keeps the policy it started with.',
+    chips:['bounded by the longest run','not eliminated'],
+    topic:'kafka: requests — the next wake, now enforced',
+    headers:['ce_type: dev.rossoctl.agent.request.v1',
+             'ce_correlationid: wary-lynx-8820',
+             ['ce_submitter: aslom', 'hl'],
+             'ce_signature: eyJhbGciOiJFZERTQSIs…',
+             '',
+             '# the new pod checks this against the list it read',
+             '# at ITS startup — the edited one.'],
+    payload:['what this does NOT fix:',
+             '',
+             'a run already in flight keeps the policy it loaded.',
+             'So the window is BOUNDED by the longest single run,',
+             'not eliminated.',
+             '',
+             '# still a large improvement over "bounded by how',
+             '# often someone remembers to redeploy".'],
+    dur:950,
+    commit:function(){ S.replicas=1; S.runnerOn=true; S.lag=1;
+      S.note='This does not help mid-run. A long run holds its old policy to completion.'; },
+    overlay:function(t){
+      chipAt.apply(null, along(P.keda2n, ease(seg(t,0,.7))).concat(['scale 1', C.amber]));
+      if(t>.7) chipAt(cx(BOX.runner), BOX.runner.y-54, 'enforcing', C.green);
+    }
+  }
+];}
+
+var FLOWS = [wakeSteps, batchSteps, forgedSteps, zeroSteps];
+var NTABS = FLOWS.length;
+var steps = [], cur = 0, curTab = 0, playing = false, raf = 0;
+
+var elTitle=document.getElementById('stepTitle'), elWire=document.getElementById('stepWire'),
+    elBody=document.getElementById('stepBody'), elChips=document.getElementById('stepChips'),
+    elNum=document.getElementById('stepNum'), elDots=document.getElementById('dots'),
+    bPrev=document.getElementById('prev'), bNext=document.getElementById('next'),
+    bPlay=document.getElementById('play'),
+    elPayWrap=document.getElementById('payloadWrap'),
+    elPayTopic=document.getElementById('payloadTopic'),
+    elPayH=document.getElementById('payloadHeaders'),
+    elPayB=document.getElementById('payloadBody');
+
+function esc(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+/* Render `lines` as highlighted mono text. A line may be a plain string, or
+   [text, cls] to mark the attribute this step sets. */
+function payLines(el, lines){
+  el.innerHTML = (lines||[]).map(function(l){
+    var txt = Array.isArray(l) ? l[0] : l;
+    var cls = Array.isArray(l) ? l[1] : null;
+    var e = esc(txt);
+    if(cls) return '<span class="'+cls+'">'+e+'</span>';
+    /* key: value — colour the key, numbers, and trailing comments */
+    e = e.replace(/^(\s*)([A-Za-z0-9_."]+)(\s*[:=]\s*)/,
+          '$1<span class="k">$2</span>$3');
+    e = e.replace(/\b(\d+(?:\.\d+)?)\b(?![^<]*<\/span>)/g, '<span class="n">$1</span>');
+    e = e.replace(/(\s+#\s.*)$/, '<span class="cm">$1</span>');
+    return e;
+  }).join('\n');
+}
+
+function renderPayload(s){
+  if(!s.headers && !s.payload){ elPayWrap.hidden = true; return; }
+  elPayWrap.hidden = false;
+  elPayTopic.textContent = s.topic || '';
+  payLines(elPayH, s.headers || ['(no CloudEvent on this step)']);
+  payLines(elPayB, s.payload || ['(no data payload)']);
+}
+
+function renderPanel(){
+  var s = steps[cur]; if(!s) return;
+  elTitle.textContent = s.title;
+  elWire.innerHTML = '';
+  (s.wire||[]).forEach(function(w){
+    var d = document.createElement('div'); d.textContent = w; elWire.appendChild(d);
+  });
+  renderPayload(s);
+  elBody.textContent = s.body || '';
+  elChips.innerHTML = '';
+  (s.chips||[]).forEach(function(c){
+    var sp=document.createElement('span'); sp.className='chip'; sp.textContent=c;
+    elChips.appendChild(sp);
+  });
+  elNum.textContent = (cur+1) + ' / ' + steps.length;
+  bPrev.disabled = (cur===0); bNext.disabled = (cur===steps.length-1);
+  Array.prototype.forEach.call(elDots.children, function(d,i){
+    d.setAttribute('aria-current', i===cur ? 'true' : 'false');
+  });
+}
+function buildDots(){
+  elDots.innerHTML='';
+  steps.forEach(function(_,i){
+    var b=document.createElement('button');
+    b.className='dot'; b.setAttribute('aria-label','Step '+(i+1));
+    b.addEventListener('click', function(){ gotoStep(i); });
+    elDots.appendChild(b);
+  });
+}
+
+function frame(s, t){ drawScene(); if(s && s.overlay) s.overlay(t); }
+
+function animate(s, done){
+  craf_(raf);
+  var t0 = Date.now(), dur = s.dur || 900;
+  (function tick(){
+    var t = Math.min(1, (Date.now()-t0)/dur);
+    frame(s, t);
+    if(t < 1){ raf = raf_(tick); }
+    else { if(s.commit) s.commit(); frame(s, 1); if(done) done(); }
+  })();
+}
+
+function gotoStep(k){
+  craf_(raf);
+  cur = Math.max(0, Math.min(steps.length-1, k));
+  freshScene(); S.tab = curTab;
+  for(var i=0;i<cur;i++){
+    if(steps[i].setup) steps[i].setup();
+    if(steps[i].commit) steps[i].commit();
+  }
+  if(steps[cur].setup) steps[cur].setup();
+  renderPanel();
+  animate(steps[cur], function(){
+    if(playing){
+      if(cur < steps.length-1){ setTimeout(function(){ if(playing) gotoStep(cur+1); }, 520); }
+      else { playing=false; bPlay.textContent='▶ Play'; }
+    }
+  });
+}
+
+function loadTab(i){
+  curTab = i; steps = FLOWS[i]();
+  for(var k=0;k<NTABS;k++){
+    var b=document.getElementById('tab'+k);
+    if(b) b.setAttribute('aria-selected', k===i ? 'true':'false');
+  }
+  buildDots(); gotoStep(0);
+}
+
+bNext.addEventListener('click', function(){ playing=false; bPlay.textContent='▶ Play'; gotoStep(cur+1); });
+bPrev.addEventListener('click', function(){ playing=false; bPlay.textContent='▶ Play'; gotoStep(cur-1); });
+bPlay.addEventListener('click', function(){
+  playing = !playing; bPlay.textContent = playing ? '❙❙ Pause' : '▶ Play';
+  if(playing){ if(cur===steps.length-1) gotoStep(0); else gotoStep(cur); }
+});
+for(var k=0;k<NTABS;k++){
+  (function(i){
+    var b=document.getElementById('tab'+i);
+    if(b) b.addEventListener('click', function(){ playing=false; bPlay.textContent='▶ Play'; loadTab(i); });
+  })(k);
+}
+document.addEventListener('keydown', function(e){
+  if(e.key==='ArrowRight'){ playing=false; bPlay.textContent='▶ Play'; gotoStep(cur+1); }
+  if(e.key==='ArrowLeft'){ playing=false; bPlay.textContent='▶ Play'; gotoStep(cur-1); }
+});
+window.addEventListener('resize', function(){ fit(); frame(steps[cur], 1); });
+if(window.matchMedia){
+  var mq = window.matchMedia('(prefers-color-scheme: dark)');
+  if(mq.addEventListener) mq.addEventListener('change', function(){
+    readColors(); frame(steps[cur], 1);
+  });
+}
+
+fit(); loadTab(0);
+})();
+</script>
+</body>
+</html>
