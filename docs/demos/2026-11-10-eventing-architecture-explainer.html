@@ -240,10 +240,25 @@
         </tbody>
       </table>
       <p class="text-[12.5px] sub mt-3">
-        KEDA does 0 → 1 and hands 1 → N to an HPA, whose <span class="mono">scaleUp</span>
-        policy here jumps straight to the cap instead of climbing. <strong style="color:var(--ink)">Partitions
-        are the real ceiling</strong> — Kafka gives each partition to one consumer in a
-        group, so <span class="mono">maxReplicaCount: 10</span> sits under the topic's 12.
+        <strong style="color:var(--ink)">Why 10 and not 100.</strong> The lag asks for one
+        pod per pending request — <span class="mono">ceil(100 / lagThreshold 1) = 100</span>
+        — and two ceilings cut it down:
+        <span class="mono">min(100, maxReplicaCount 10, partitions 12) = 10</span>.
+        Kafka gives each partition to exactly one consumer in a group, so an eleventh pod
+        would sit idle. Raising the cap past 12 means adding partitions first; the two
+        numbers are one decision.
+      </p>
+      <p class="text-[12.5px] sub mt-2">
+        <strong style="color:var(--ink)">10 pods is not 10 agents.</strong> Each pod runs up
+        to <span class="mono">ER_MAX_CONCURRENT = 4</span> turns at once, so the batch peaks
+        near 40 concurrent agents — which is why the CLI reports 16 running against 10
+        replicas.
+      </p>
+      <p class="text-[12.5px] sub mt-2">
+        KEDA does 0 → 1 itself and hands 1 → N to an HPA. The Kubernetes default adds at
+        most <span class="mono">max(100%, 4 pods)</span> per 15 s, so a burst would climb
+        1 → 5 → 10 over ~30 s — half the batch. The explicit
+        <span class="mono">scaleUp</span> policy takes the whole cap in one step instead.
       </p>
       <p class="text-[12.5px] sub mt-2">
         While a group is open its members' own notifications are suppressed, keyed on
@@ -477,7 +492,10 @@ var S;
 function freshScene(){
   S = { replicas:0, runnerOn:false, lag:0, signedReq:false, signedTerm:false,
         stored:0, refused:false, bound:false, seq:0, tab:0, note:'',
-        group:false, expected:0, done:0 };
+        group:false, expected:0, done:0,
+        /* KEDA metrics panel: kTotal members, kDone finished, kRun in flight,
+           kLag still unclaimed, kCalc the arithmetic to show */
+        keda:false, kTotal:0, kDone:0, kRun:0, kLag:0, kCalc:[] };
 }
 freshScene();
 
@@ -534,6 +552,49 @@ function drawScene(){
     }
   }
   ctx.restore();
+
+  /* KEDA metrics panel — what the autoscaler reads and what it decides. Only on the
+     batch flow, where the numbers are the point. */
+  if(S.keda){
+    var px = 24, py = 436, pw = 600, ph = 150;
+    ctx.save();
+    roundRect(px, py, pw, ph, 10);
+    ctx.fillStyle = C.panel2; ctx.fill();
+    ctx.strokeStyle = C.line; ctx.lineWidth = 1.2; ctx.stroke();
+
+    ctx.font = '600 10.5px "IBM Plex Mono", monospace';
+    ctx.fillStyle = C.blue; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText('KEDA  —  what it reads, and what it decides', px+14, py+11);
+
+    /* queue depth bar: claimed (being worked) vs unclaimed (still queued) */
+    var bx = px+14, by = py+40, bw = pw-28, bh = 18;
+    var tot = Math.max(1, S.kTotal || 100);
+    roundRect(bx, by, bw, bh, 4);
+    ctx.fillStyle = C.bg; ctx.fill();
+    ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
+    var wDone = bw * ((S.kDone||0)/tot);
+    var wRun  = bw * ((S.kRun||0)/tot);
+    if(wDone > 0){ roundRect(bx, by, Math.max(2,wDone), bh, 4);
+                   ctx.fillStyle = C.green; ctx.fill(); }
+    if(wRun > 0){  ctx.fillStyle = C.amber;
+                   ctx.fillRect(bx+wDone, by, Math.max(2,wRun), bh); }
+    ctx.font = '600 10px "IBM Plex Mono", monospace';
+    ctx.fillStyle = C.ink2; ctx.textBaseline = 'middle';
+    ctx.fillText('lag ' + (S.kLag||0) + ' unclaimed', bx+wDone+wRun+8, by+bh/2);
+    ctx.textBaseline = 'top';
+    ctx.fillText('done ' + (S.kDone||0) + '   running ' + (S.kRun||0)
+                 + '   queued ' + (S.kLag||0) + '   of ' + tot,
+                 bx, by+bh+7);
+
+    /* the arithmetic, spelled out */
+    ctx.font = '400 11px "IBM Plex Mono", monospace';
+    ctx.fillStyle = C.ink;
+    var lines = S.kCalc || [];
+    for(var li=0; li<lines.length; li++){
+      ctx.fillText(lines[li], bx, by+bh+28+li*15);
+    }
+    ctx.restore();
+  }
 
   if(S.signedReq) chipAt(cx(BOX.reqtop), BOX.reqtop.y+BOX.reqtop.h+22, 'signed', C.green);
   if(S.signedTerm) chipAt(cx(BOX.restop), BOX.restop.y-22, 'signed final', C.green);
@@ -845,62 +906,179 @@ function batchSteps(){ return [
       if(t>.35) chipAt.apply(null, along(P.b2r, ease(seg(t,.35,1))).concat(['×100 wakes', C.blue]));
     }
   },
-  { title:'KEDA jumps straight to the replica cap',
-    wire:['KEDA → Kafka: lag = 100',
-          'KEDA → HPA → Deployment/eventrunner: replicas 0 → 10'],
-    body:'KEDA handles zero to one. It delegates one to N to an HPA. The explicit scaleUp policy reaches the cap in one step instead of climbing over thirty seconds.',
-    chips:['t=6s → replicas 10','maxReplicaCount: 10','behavior.scaleUp'],
-    topic:'control plane — no CloudEvent',
-    headers:['ScaledObject/eventrunner',
-             '  minReplicaCount: 0',
-             '  maxReplicaCount: 10          # under 12 partitions',
-             '  pollingInterval: 5',
-             '  trigger: kafka  lagThreshold: 1',
-             '  consumerGroup: eventrunner   # must match ER_CONSUMER_GROUP'],
-    payload:['measured on ykt1:',
+  { title:'KEDA reads the lag, and the lag is 100',
+    wire:['KEDA → Kafka: describe consumer group "kev1-eventrunner"',
+          '  → sum of per-partition lag = 100'],
+    body:'KEDA polls the consumer group every five seconds. It sums the lag across the topic\'s partitions. Because the offset commits only after a terminal event, that 100 means one hundred unfinished requests, not one hundred unread messages.',
+    chips:['pollingInterval: 5','lagThreshold: 1','offsetResetPolicy: earliest'],
+    topic:'control plane — the metric, not an event',
+    headers:['ScaledObject/eventrunner  →  triggers[0]',
+             '  type: kafka',
+             '  topic: kev1-requests',
+             ['  consumerGroup: kev1-eventrunner', 'hl'],
+             ['  lagThreshold: "1"              # 1 pending request wakes a pod', 'hl'],
+             '  activationLagThreshold: "0"     # 0 → 1 on any lag at all',
+             '  offsetResetPolicy: earliest',
+             ['', null],
+             '# consumerGroup MUST equal ER_CONSUMER_GROUP.',
+             '# A mismatch is a silent no-scale: KEDA measures',
+             '# a group nobody joins, sees lag 0, never scales.'],
+    payload:['$ kafka-consumer-groups.sh --describe \\',
+             '    --group kev1-eventrunner',
              '',
-             't=6s    replicas=10            # cap in one step',
-             't=12s   replicas=10 running=1',
-             't=30s   replicas=10 running=8',
-             't=33s   replicas=0             # the batch drained'],
-    dur:1150,
+             'PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG',
+             '0          0               9               9',
+             '1          0               8               8',
+             '…          …               …               …',
+             '11         0               8               8',
+             '                                     TOTAL 100'],
+    dur:1050,
     setup:function(){ S.tab=1; },
-    commit:function(){ S.tab=1; S.group=true; S.expected=100; S.lag=100;
-      S.replicas=3; S.runnerOn=true; S.signedReq=true;
-      S.note='Partitions are the real ceiling: Kafka gives each partition to one consumer.'; },
+    commit:function(){ S.tab=1; S.group=true; S.expected=100; S.lag=100; S.signedReq=true;
+      S.keda=true; S.kTotal=100; S.kDone=0; S.kRun=0; S.kLag=100;
+      S.kCalc=['lag 100  ≥  lagThreshold 1   → scale up',
+               'desired = ceil(lag / lagThreshold) = ceil(100/1) = 100',
+               'bounded by maxReplicaCount 10   → desired = 10'];
+      S.note='Lag means unfinished work. That is what makes it a usable queue gauge.'; },
     overlay:function(t){
-      chipAt.apply(null, along(P.keda2req, ease(seg(t,0,.4))).concat(['lag 100', C.amber]));
-      if(t>.45) chipAt.apply(null, along(P.keda2n, ease(seg(t,.45,1))).concat(['scale 10', C.amber]));
+      chipAt.apply(null, along(P.keda2req, ease(seg(t,0,.8))).concat(['describe', C.amber]));
     }
   },
-  { title:'Ten pods drain the backlog in parallel',
-    wire:['EventRunner ×10: consume → verify → spawn agent',
-          'EventRunner ×10 → Kafka:responses  ce_correlationid=<per member>'],
-    body:'Each pod takes whole partitions. Turns are FIFO within one correlation id and parallel across them, so one hundred independent conversations never interleave.',
-    chips:['12 partitions','10 replicas','ER_MAX_CONCURRENT = 4 per pod'],
-    topic:'kafka: responses — one member terminal',
-    headers:['ce_type: dev.rossoctl.agent.response.v1',
-             ['ce_correlationid: fresh-mole-0029', 'hl'],
-             ['ce_groupid: bold-hornet-2962      # member → group', 'hl'],
-             'ce_sequence: 2',
-             'ce_phase: result',
-             ['ce_final: true', 'hl'],
-             'ce_causationid: <id of that member’s wake>',
-             'ce_signature: eyJhbGciOiJFZERTQSIs…'],
-    payload:['{', '  "type": "result",', '  "role": "final",',
-             '  "text": "Hello 29",',
-             '  "stats": { "num_turns": 1, "duration_ms": 1980 }', '}',
+  { title:'KEDA wants 100 pods. The cap gives it 10',
+    wire:['KEDA: desired = ceil(lag / lagThreshold) = 100',
+          'KEDA → HPA: clamp to maxReplicaCount = 10',
+          'HPA → Deployment/eventrunner: replicas 0 → 10'],
+    body:'The naive answer is one pod per pending request. Two ceilings cut it to ten. The cap is set to ten, and the topic has twelve partitions — Kafka gives each partition to exactly one consumer in a group, so an eleventh pod would sit idle.',
+    chips:['desired 100 → 10','maxReplicaCount: 10','12 partitions = hard ceiling'],
+    topic:'control plane — the clamp',
+    headers:['minReplicaCount: 0',
+             ['maxReplicaCount: 10        # under the topic’s 12 partitions', 'hl'],
              '',
-             '# ×100, one per member, each on its own',
-             '# correlationid partition'],
-    dur:1100,
+             '# Raising this above 12 would need more partitions',
+             '# first — the two numbers are ONE decision.',
+             '# Lowering it, as here, needs nothing: 12 partitions',
+             '# over 10 consumers means two own two each.'],
+    payload:['why ten and not a hundred:',
+             '',
+             '  ceil(100 / 1)      = 100   ← what the lag asks for',
+             '  maxReplicaCount    =  10   ← the configured cap',
+             '  requests partitions=  12   ← Kafka’s hard ceiling',
+             '',
+             'effective = min(100, 10, 12) = 10',
+             '',
+             '# concurrency is 10 pods × ER_MAX_CONCURRENT 4',
+             '# = up to 40 turns at once, not 10.'],
+    dur:1150,
     setup:function(){ S.tab=1; },
-    commit:function(){ S.tab=1; S.group=true; S.expected=100; S.replicas=3;
-      S.runnerOn=true; S.lag=40; S.done=41; S.signedReq=true; S.signedTerm=true; S.stored=41;
+    commit:function(){ S.tab=1; S.group=true; S.expected=100; S.lag=100; S.signedReq=true;
+      S.replicas=3; S.runnerOn=true;
+      S.keda=true; S.kTotal=100; S.kDone=0; S.kRun=0; S.kLag=100;
+      S.kCalc=['desired = ceil(100 / 1) = 100',
+               'min(desired 100, maxReplica 10, partitions 12) = 10',
+               'replicas 0 → 10   ·   40 concurrent turns (×4 per pod)'];
+      S.note='A pod per request is not the goal. A partition per pod is the limit.'; },
+    overlay:function(t){
+      chipAt.apply(null, along(P.keda2n, ease(seg(t,0,.8))).concat(['scale 0→10', C.amber]));
+    }
+  },
+  { title:'The whole cap arrives in one step, not over thirty seconds',
+    wire:['HPA behavior.scaleUp: policies[0] = Pods 10 per 15s',
+          '  stabilizationWindowSeconds: 0   selectPolicy: Max'],
+    body:'KEDA scales zero to one itself and delegates one to N to an HPA. The Kubernetes default adds at most four pods or one hundred per cent per fifteen seconds, so a burst would climb one, five, ten over about thirty seconds. A batch that finishes in a minute would be half over before its capacity existed.',
+    chips:['default: 1→5→10 over ~30s','explicit: 0→10 at t=6s','selectPolicy: Max'],
+    topic:'control plane — the policy that makes it fast',
+    headers:['advanced.horizontalPodAutoscalerConfig.behavior:',
+             '  scaleUp:',
+             ['    stabilizationWindowSeconds: 0', 'hl'],
+             '    selectPolicy: Max',
+             '    policies:',
+             ['      - type: Pods   value: 10   periodSeconds: 15', 'hl'],
+             '  scaleDown:',
+             '    stabilizationWindowSeconds: 30   # not the 300s default'],
+    payload:['without the explicit policy (k8s default):',
+             '  t=0s   1 pod',
+             '  t=15s  5 pods     max(100%, 4 pods) per 15s',
+             '  t=30s  10 pods    ← cap reached, batch half done',
+             '',
+             'with it, measured:',
+             '  t=6s   replicas=10          ← cap in one step',
+             '  t=12s  replicas=10 running=1',
+             '  t=30s  replicas=10 running=8'],
+    dur:1150,
+    setup:function(){ S.tab=1; },
+    commit:function(){ S.tab=1; S.group=true; S.expected=100; S.lag=100; S.signedReq=true;
+      S.replicas=3; S.runnerOn=true;
+      S.keda=true; S.kTotal=100; S.kDone=0; S.kRun=4; S.kLag=96;
+      S.kCalc=['replicas 10 Ready at t=6s',
+               'first terminals land ~t=12s',
+               'no thundering herd: the ceiling is already bounded'];
+      S.note='0/100 done · 100 queued · 8s elapsed'; },
+    overlay:function(t){
+      chipAt.apply(null, along(P.r2n, ease(seg(t,0,.7))).concat(['×10 consume', C.blue]));
+    }
+  },
+  { title:'The queue drains, and the lag tracks unfinished work',
+    wire:['EventRunner ×10: consume → verify → spawn agent → publish result',
+          'Kafka: offsets commit per member, after each terminal event'],
+    body:'Each pod owns whole partitions and runs up to four turns at once. The lag falls only as terminal events land, so the number KEDA reads is always the work still outstanding.',
+    chips:['4/100 → 41/100 → 88/100','lag 96 → 43 → 7','10 pods throughout'],
+    topic:'the group status endpoint, polled by the CLI',
+    headers:['GET /v0/groups/bold-hornet-2962/status',
+             '',
+             '# the CLI prints one line per poll. Each line is',
+             '# done + running + queued = 100, always.'],
+    payload:['  4/100 done ·  4 running · 92 queued ·   24s',
+             ' 41/100 done · 16 running · 43 queued ·   45s',
+             ' 88/100 done ·  5 running ·  7 queued · 1m00s',
+             '100/100 done ·                         1m20s',
+             '',
+             '# "running" exceeds 10 because each pod runs up to',
+             '# ER_MAX_CONCURRENT = 4 turns in parallel.'],
+    dur:1300,
+    setup:function(){ S.tab=1; },
+    commit:function(){ S.tab=1; S.group=true; S.expected=100; S.signedReq=true;
+      S.replicas=3; S.runnerOn=true; S.lag=43; S.done=41; S.signedTerm=true; S.stored=41;
+      S.keda=true; S.kTotal=100; S.kDone=41; S.kRun=16; S.kLag=43;
+      S.kCalc=['lag 43  ≥  lagThreshold 1   → hold at 10',
+               'a pod mid-run cannot be scaled away: its offset',
+               '  is uncommitted, so its work still counts as lag'];
       S.note='41/100 done · 16 running · 43 queued · 45s elapsed'; },
     overlay:function(t){
-      chipAt.apply(null, along(P.r2n, ease(seg(t,0,.45))).concat(['consume ×10', C.blue]));
-      if(t>.4) chipAt.apply(null, along(P.n2res, ease(seg(t,.4,1))).concat(['results', C.green]));
+      chipAt.apply(null, along(P.r2n, ease(seg(t,0,.4))).concat(['consume', C.blue]));
+      if(t>.35) chipAt.apply(null, along(P.n2res, ease(seg(t,.35,1))).concat(['41 results', C.green]));
+    }
+  },
+  { title:'Lag reaches zero, and the replicas go with it',
+    wire:['Kafka: last offset committed → consumer group lag = 0',
+          'KEDA → Deployment/eventrunner: replicas 10 → 0'],
+    body:'KEDA bypasses the HPA for N to zero, so scale-to-zero is not held by the stabilization window. The batch is over and the cost returns to nothing.',
+    chips:['lag 0 → replicas 0','N→0 bypasses the HPA','cooldownPeriod: 5 on kind/test'],
+    topic:'control plane — back to rest',
+    headers:['lag 0  <  activationLagThreshold+1   → deactivate',
+             'KEDA scales N → 0 directly, not through the HPA',
+             '',
+             '# so scaleDown.stabilizationWindowSeconds (30) applies',
+             '# to 10 → 5 → 1, and NOT to the final drop to zero.',
+             '',
+             '# cooldownPeriod is 300 in k8s/base and patched to 5 by',
+             '# the kind and test overlays — the 22 s figure is theirs.'],
+    payload:['t=33s   replicas=0     # the batch drained',
+             '',
+             'at rest:',
+             '  lag 0   ·   replicas 0   ·   cost 0',
+             '',
+             '# EventBridge stays at 1 replica. It is the front',
+             '# door, and it is not what scales.'],
+    dur:1100,
+    setup:function(){ S.tab=1; },
+    commit:function(){ S.tab=1; S.group=true; S.expected=100; S.done=100;
+      S.lag=0; S.replicas=0; S.runnerOn=false; S.signedTerm=true; S.stored=100;
+      S.keda=true; S.kTotal=100; S.kDone=100; S.kRun=0; S.kLag=0;
+      S.kCalc=['lag 0   → deactivate   → replicas 10 → 0',
+               '100 agents, 1m20s, 0 failed, slowest member 79.6 s'];
+      S.note='Idle costs nothing. The next batch wakes it again in about two seconds.'; },
+    overlay:function(t){
+      chipAt.apply(null, along(P.keda2n, 1-ease(seg(t,0,.8))).concat(['scale 10→0', C.amber]));
     }
   },
   { title:'The group completes, and sends the second notification',
@@ -929,7 +1107,11 @@ function batchSteps(){ return [
     setup:function(){ S.tab=1; },
     commit:function(){ S.tab=1; S.group=true; S.expected=100; S.done=100;
       S.lag=0; S.replicas=0; S.runnerOn=false; S.signedTerm=true; S.stored=100; S.bound=true;
-      S.note='✔ group complete · 100 finished · 0 failed · 1m20s · back to 0 replicas'; },
+      S.keda=true; S.kTotal=100; S.kDone=100; S.kRun=0; S.kLag=0;
+      S.kCalc=['100 members counted against expected 100 → reason "all"',
+               '2 notifications sent, whatever the batch size',
+               'slowest member 79.6 s   ·   total 1m20s'];
+      S.note='✔ group complete · 100 finished · 0 failed · 1m20s'; },
     overlay:function(t){
       chipAt.apply(null, along(P.n2res, 1-ease(seg(t,0,.45))).concat(['group.completed', C.teal]));
       if(t>.4) chipAt.apply(null, along(P.res2s, ease(seg(t,.4,.8))).concat(['100/100', C.green]));

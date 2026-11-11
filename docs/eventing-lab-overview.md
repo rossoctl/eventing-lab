@@ -12,11 +12,10 @@ someone changing the code. For that, read
 figures in §5 expire; §§1–3 do not. Where a number appears here it is quoted
 from the document that measured it, named inline.
 
-**Changed since 2026-10-09:** the signed event path has now run end to end on a
-cluster — the single item §4 and §5 were previously blocked on. 54 of 55
-assertions passed; seven bugs surfaced, every one of them reachable only on a
-cluster. §4, §5 and §6 are re-checked against
-[`reports/phase2-cluster-run-report.md`](reports/phase2-cluster-run-report.md).
+**Changed since 2026-10-09:** the signed event path has now run end to end on a cluster.
+That was the single item §4 and §5 were blocked on. 54 of 55 assertions passed. Seven bugs
+surfaced, every one of them reachable only on a cluster. §4, §5 and §6 are re-checked
+against [`reports/phase2-cluster-run-report.md`](reports/phase2-cluster-run-report.md).
 
 ---
 
@@ -243,15 +242,22 @@ honestly: per-user topics are primarily a **scaling** improvement that looks lik
 an isolation feature — the aggregate concurrency ceiling rises from 12 pods to
 roughly 300.
 
-Three further designs worth knowing: a per-user ntfy topic must **not** contain
-the user's name, because the name travels to the phone; a fetched skill bundle
-is a **supply-chain artifact** and passes five fail-closed gates (source
-allowlist, empty by default because otherwise the runner is an SSRF proxy with
-cluster-internal reach; mandatory digest pinning; a signature for anything that
-can execute; strip-what-was-not-signed; safe extraction with hard caps); and
-event triggers carry **four independent loop controls**, because in this system a
-cycle does not hang — *it bills*, in parallel, until someone notices. The hop
-counter is a signed attribute, since an unsigned counter can be reset in flight.
+Three further designs are worth knowing.
+
+**A per-user ntfy topic must not contain the user's name.** The name travels to the phone.
+
+**A fetched skill bundle is a supply-chain artifact.** It passes five fail-closed gates:
+
+1. a source allowlist, empty by default — otherwise the runner is an SSRF proxy with
+   cluster-internal reach
+2. mandatory digest pinning
+3. a signature for anything that can execute
+4. strip what was not signed
+5. safe extraction, with hard caps
+
+**Event triggers carry four independent loop controls.** A cycle here does not hang —
+*it bills*, in parallel, until someone notices. The hop counter is a signed attribute,
+because an unsigned counter can be reset in flight.
 
 ### Phase 4 — human-in-the-loop approval (design only)
 
@@ -294,24 +300,34 @@ cryptographic control.
 
 Two statuses deserve emphasis because they are easy to misread.
 
-**Phase 3's `multi` mode is for developing against, not running.** It gives each
-tenant its own store and topics, but until T6 neither consumer subscribes to the
-per-user topics, so **no response is ever consumed** — transcript pages stay
-empty and group counters never advance (`reports/phase3-report.md` §5, which is
-explicit that this is a more useful warning than "not yet isolated", because the
-latter implies a working-but-unisolated mode). Reads are also not owner-scoped: a
-read routes to the owning tenant's store, but nothing checks the caller is that
-owner. The flag is deliberately environment-only — a committed config file that
-could flip it is "a way to get per-user isolation half-enabled by accident".
+**Phase 3's `multi` mode is for developing against, not running.** It gives each tenant
+its own store and topics. But until T6 neither consumer subscribes to the per-user topics,
+so **no response is ever consumed**: transcript pages stay empty and group counters never
+advance.
+
+`reports/phase3-report.md` §5 states this as "no response is ever consumed" rather than
+"not yet isolated", because the second phrasing implies a working-but-unisolated mode.
+
+**Reads are also not owner-scoped.** A read routes to the owning tenant's store, but
+nothing checks that the caller is that owner.
+
+The flag is deliberately environment-only. A committed config file that could flip it is
+"a way to get per-user isolation half-enabled by accident".
 
 **Signing is now proven in deployment, and the proving is what found the
 bugs.** The cryptography was already checked against the RFC's own test vectors
-and the canonicalisation is injective. On 2026-10-14 the signed path also ran
-end to end on a Kind cluster with `ER_REQUIRE_SIGNATURE` and
-`EB_REQUIRE_RESPONSE_SIGNATURE` both `true`: a signed request woke the runner, a
-forged response was refused and inert, a forged *request* was refused, and the
-audit trail separated bound chains from orphaned ones
-([`reports/phase2-cluster-run-report.md`](reports/phase2-cluster-run-report.md)).
+and the canonicalisation is injective.
+
+On 2026-10-14 the signed path also ran end to end on a Kind cluster, with
+`ER_REQUIRE_SIGNATURE` and `EB_REQUIRE_RESPONSE_SIGNATURE` both `true`. Four things held:
+
+- a signed request woke the runner
+- a forged response was refused, and stayed inert
+- a forged *request* was refused
+- the audit trail separated bound chains from orphaned ones
+
+Full record:
+[`reports/phase2-cluster-run-report.md`](reports/phase2-cluster-run-report.md).
 
 Three qualifications travel with that, and they are the reason the row above
 still says "default off":
@@ -354,12 +370,15 @@ requests, so their signatures are genuine — but the age guard runs before the
 signature check and dropped them as stale without verifying it: freshness is a
 separate control from origin.
 
-**The decision that shapes everything else: two of the four seams name SPIRE,
-and there is no SPIRE.** Wiring it is not a flag flip — it requires an
-issuer-agnostic verifier, which means either adding EC/RSA support to
-hand-rolled pure-Python crypto or relaxing the no-C-extensions rule in favour of
-`cryptography`. That is the dominant engineering cost of the remaining plan, and
-it is where the §1.1 constraint stops being free.
+**The decision that shapes everything else: two of the four seams name SPIRE, and there
+is no SPIRE.** Wiring it is not a flag flip. It requires an issuer-agnostic verifier, and
+that means one of two things:
+
+- add EC/RSA support to the hand-rolled pure-Python crypto, or
+- relax the no-C-extensions rule in favour of `cryptography`.
+
+That is the dominant engineering cost of the remaining plan. It is also where the §1.1
+constraint stops being free.
 
 The recommendation on record is to **reframe SPIRE as the named upgrade path**
 rather than fake a fourth seam on stage, on the grounds that "overselling the
@@ -401,12 +420,13 @@ are where this system fails, and the two services fail in *opposite* directions.
 Phases 3 and 4 add controls of exactly the same shape, so the five questions need
 to be a gate on new work rather than a retrospective on old work.
 
-**The cluster run sharpened that, and widened it.** Seven more bugs, none
-reachable by the test suite or by reading code, because all seven were about the
-deployment rather than the logic: an image without the signing code in it, a
-keyset written but never read by the running process. The documentation was not
-the weak link this time — **the tooling was**, and it reported green throughout
-while the system refused all traffic. So the gate needs the sixth question in §3
+**The cluster run sharpened that, and widened it.** Seven more bugs, none reachable by the
+test suite or by reading code. All seven were about the deployment rather than the logic —
+an image without the signing code in it, a keyset written but never read by the running
+process.
+
+The documentation was not the weak link this time. **The tooling was.** It reported green
+throughout, while the system refused all traffic. So the gate needs the sixth question in §3
 as well: *is the thing you checked the thing that is running?* Six of the seven
 are fixed; the seventh is [#12](https://github.com/rossoctl/eventing-lab/issues/12),
 a service that starts happily while enforcing against zero approved keys. The
