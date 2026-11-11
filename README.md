@@ -15,7 +15,7 @@ See it working, and find out where a composition like this actually leaks:
 - **🎤 [The Seams Are the Trap: Agent Fleets from CNCF Parts You Already Have](https://events.linuxfoundation.org/kubecon-cloudnativecon-north-america/program/schedule/?id=1248035)** —
   KubeCon + CloudNativeCon NA, **Thu 12 November 2026, 1:50–2:20 PM MST** ·
   Salt Palace, Level 2, Room 255 BC
-- **🔍 [Walk the wire, one message at a time](docs/demos/2026-11-10-eventing-architecture-explainer.html)** —
+- **🔍 [Walk the wire, one message at a time](https://rossoctl.github.io/eventing-lab/demos/2026-11-10-eventing-architecture-explainer.html)** —
   an interactive diagram of four flows (one agent, a batch of 100, a forged event,
   scale-to-zero), showing the Kafka headers and data payload at every step
 - **📋 [The four seams, with honest status](docs/notes/kubecon-na-2026.md)** — two closed,
@@ -38,7 +38,7 @@ See it working, and find out where a composition like this actually leaks:
 | If you want to… | Go to |
 |---|---|
 | **See it work** | the [demo recording](https://youtu.be/s6494nZZ-hM), then [`docs/demos/`](docs/demos/) |
-| **Understand the wire, step by step** | [the interactive explainer](docs/demos/2026-11-10-eventing-architecture-explainer.html) — open it in a browser; headers and payload on every step |
+| **Understand the wire, step by step** | [the interactive explainer](https://rossoctl.github.io/eventing-lab/demos/2026-11-10-eventing-architecture-explainer.html) — headers and payload on every step ([source](docs/demos/2026-11-10-eventing-architecture-explainer.html)) |
 | **Follow the KubeCon talk** | [`docs/notes/kubecon-na-2026.md`](docs/notes/kubecon-na-2026.md) (the four seams) and the [run-of-show](docs/demos/kubecon-na-2026-demo.md) |
 | **Understand it without reading code** | [`docs/eventing-lab-overview.md`](docs/eventing-lab-overview.md) |
 | **Run it on your laptop** | [Quickstart](#quickstart) below, then [`docs/demos/phase1-demo.md`](docs/demos/phase1-demo.md) |
@@ -271,7 +271,7 @@ lifecycle that decides where a new document goes. The short version:
 | [`docs/eventing-lab-overview.md`](docs/eventing-lab-overview.md) | **start here if you will not open the code** — what each phase decided, built vs designed |
 | [`docs/specs/`](docs/specs/) | the five phase designs — what *will* be true, revised in place |
 | [`docs/reports/`](docs/reports/) | what each phase **actually built and measured** — append-only, never rewritten |
-| [`docs/demos/`](docs/demos/) | performed runbooks — the [KubeCon run-of-show](docs/demos/kubecon-na-2026-demo.md), the [screenplay](docs/demos/kubecon-na-2026-screenplay.md) the recording was cut from, and the [interactive explainer](docs/demos/2026-11-10-eventing-architecture-explainer.html) |
+| [`docs/demos/`](docs/demos/) | performed runbooks — the [KubeCon run-of-show](docs/demos/kubecon-na-2026-demo.md), the [screenplay](docs/demos/kubecon-na-2026-screenplay.md) the recording was cut from, and the [interactive explainer](https://rossoctl.github.io/eventing-lab/demos/2026-11-10-eventing-architecture-explainer.html) |
 | [`docs/adrs/`](docs/adrs/) | one decision per file, permanent |
 | [`docs/glossary.md`](docs/glossary.md) | terms |
 
