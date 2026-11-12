@@ -227,18 +227,23 @@
       <table class="w-full text-[13px]">
         <tbody>
           <tr><td class="py-1.5">submitted</td><td class="py-1.5 mono">100 agents, one POST</td></tr>
-          <tr style="border-top:1px solid var(--line)"><td class="py-1.5">finished / failed</td>
+          <tr style="border-top:1px solid var(--line)"><td class="py-1.5">finished / failed <span class="mono" style="color:var(--ink2)">¹</span></td>
             <td class="py-1.5 mono"><span style="color:var(--green)">100</span> / 0</td></tr>
-          <tr style="border-top:1px solid var(--line)"><td class="py-1.5">wall clock</td>
+          <tr style="border-top:1px solid var(--line)"><td class="py-1.5">wall clock <span class="mono" style="color:var(--ink2)">¹</span></td>
             <td class="py-1.5 mono">1m20s</td></tr>
-          <tr style="border-top:1px solid var(--line)"><td class="py-1.5">slowest agent</td>
+          <tr style="border-top:1px solid var(--line)"><td class="py-1.5">slowest agent <span class="mono" style="color:var(--ink2)">¹</span></td>
             <td class="py-1.5 mono">79.6 s</td></tr>
-          <tr style="border-top:1px solid var(--line)"><td class="py-1.5">peak replicas</td>
+          <tr style="border-top:1px solid var(--line)"><td class="py-1.5">peak replicas <span class="mono" style="color:var(--ink2)">²</span></td>
             <td class="py-1.5 mono">10 — the cap, reached at t=6s</td></tr>
-          <tr style="border-top:1px solid var(--line)"><td class="py-1.5">notifications</td>
+          <tr style="border-top:1px solid var(--line)"><td class="py-1.5">notifications <span class="mono" style="color:var(--ink2)">¹</span></td>
             <td class="py-1.5 mono">2 — not 100, not 102</td></tr>
         </tbody>
       </table>
+      <p class="text-[11.5px] sub mt-2">
+        <span class="mono">¹</span> CLI run · <span class="mono">²</span> watcher run —
+        <strong style="color:var(--ink)">two different batches.</strong> Do not pair a time
+        from one with a count from the other; `agent-groups-demo.md` §Part 2 has both.
+      </p>
       <p class="text-[12.5px] sub mt-3">
         <strong style="color:var(--ink)">Why 10 and not 100.</strong> The lag asks for one
         pod per pending request — <span class="mono">ceil(100 / lagThreshold 1) = 100</span>
@@ -976,7 +981,7 @@ function batchSteps(){ return [
       S.keda=true; S.kTotal=100; S.kDone=0; S.kRun=0; S.kLag=100;
       S.kCalc=['desired = ceil(100 / 1) = 100',
                'min(desired 100, maxReplica 10, partitions 12) = 10',
-               'replicas 0 → 10   ·   40 concurrent turns (×4 per pod)'];
+               'KEDA 0 → 1, then HPA 1 → 10   ·   up to 40 turns'];
       S.note='A pod per request is not the goal. A partition per pod is the limit.'; },
     overlay:function(t){
       chipAt.apply(null, along(P.keda2n, ease(seg(t,0,.8))).concat(['scale 0→10', C.amber]));
@@ -1012,11 +1017,11 @@ function batchSteps(){ return [
     setup:function(){ S.tab=1; },
     commit:function(){ S.tab=1; S.group=true; S.expected=100; S.lag=100; S.signedReq=true;
       S.replicas=3; S.runnerOn=true;
-      S.keda=true; S.kTotal=100; S.kDone=0; S.kRun=4; S.kLag=96;
-      S.kCalc=['replicas 10 Ready at t=6s',
-               'first terminals land ~t=12s',
+      S.keda=true; S.kTotal=100; S.kDone=0; S.kRun=1; S.kLag=99;
+      S.kCalc=['watcher run: replicas 10 Ready at t=6s',
+               'watcher run: t=12s  replicas=10  running=1',
                'no thundering herd: the ceiling is already bounded'];
-      S.note='0/100 done · 4 running · 96 queued · 8s elapsed'; },
+      S.note='Watcher run at t=12s: 10 replicas up, 1 agent running.'; },
     overlay:function(t){
       chipAt.apply(null, along(P.r2n, ease(seg(t,0,.7))).concat(['×10 consume', C.blue]));
     }
@@ -1087,7 +1092,8 @@ function batchSteps(){ return [
       S.lag=0; S.replicas=0; S.runnerOn=false; S.signedTerm=true; S.stored=100;
       S.keda=true; S.kTotal=100; S.kDone=100; S.kRun=0; S.kLag=0;
       S.kCalc=['lag 0   → deactivate   → replicas 10 → 0',
-               '100 agents, 1m20s, 0 failed, slowest member 79.6 s'];
+               'no elapsed time here: the drain and the total are',
+               '  measured in different runs (see the payload)'];
       S.note='Idle costs nothing. The next batch wakes it again in about two seconds.'; },
     overlay:function(t){
       chipAt.apply(null, along(P.keda2n, 1-ease(seg(t,0,.8))).concat(['scale 10→0', C.amber]));
