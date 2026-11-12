@@ -3,18 +3,18 @@
 Status: Accepted
 
 How to write prose in this repository. The shape is borrowed from
-[ASD-STE100](https://asd-ste100.org/) — Simplified Technical English — because the goal is
-the same: a reader under time pressure, often not a native English speaker, who needs the
-fact and not the flourish.
+[ASD-STE100](https://asd-ste100.org/), Simplified Technical English. The goal is the same:
+a reader under time pressure, often not a native English speaker, who needs the fact and
+not the flourish.
 
 **This is about sentences, not about voice.** The rules below shorten and disambiguate.
 They do not ask you to write blandly, and rule 6 exists to say so.
 
 **Where this sits.** [`../CLAUDE.md`](../CLAUDE.md) § "Writing style for docs" governs
-*what* a document must contain — be falsifiable, state the limits, write the correction as
-the new fact. This file governs *how* the sentences read. Put a new rule in whichever file
-it belongs to, rather than starting a third list. [`README.md`](README.md) decides which
-*kind* of document you are writing in the first place.
+*what* a document must contain. Be falsifiable, state the limits, write the correction as
+the new fact. This file governs *how* the sentences read. [`README.md`](README.md) decides
+which *kind* of document you are writing. Put a new rule in whichever file it belongs to,
+rather than starting a third list.
 
 ---
 
@@ -61,9 +61,9 @@ same page has to decide whether they are the same thing.
 | remove a deployment | **delete** | tear down, destroy |
 
 **`refuse` in prose, `rejected` in code.** This is not an inconsistency. `rejected` is
-already a wire value and an identifier — `rejected_unsigned`, `is_rejected`, the literal
-state `"rejected"` — so renaming it would break the audit tool and the stored verdicts.
-Prose gets one verb; the protocol keeps its noun.
+already a wire value and an identifier: `rejected_unsigned`, `is_rejected`, and the literal
+state `"rejected"`. Renaming it would break the audit tool and the stored verdicts. Prose
+gets one verb. The protocol keeps its noun.
 
 **Two words are deliberately not on the list.** `start` is fine in `cold start`,
 `start offset` and `starting with`. `trigger` is a **Phase 3 feature name** with its own

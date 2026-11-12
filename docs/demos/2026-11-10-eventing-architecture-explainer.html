@@ -499,8 +499,9 @@ function freshScene(){
         stored:0, refused:false, bound:false, seq:0, tab:0, note:'',
         group:false, expected:0, done:0,
         /* KEDA metrics panel: kTotal members, kDone finished, kRun in flight,
-           kLag still unclaimed, kCalc the arithmetic to show */
-        keda:false, kTotal:0, kDone:0, kRun:0, kLag:0, kCalc:[] };
+           kLag still queued (the CLI's column), kKafkaLag the Kafka consumer-group lag
+           (a different number — see drawScene), kCalc the arithmetic to show */
+        keda:false, kTotal:0, kDone:0, kRun:0, kLag:0, kKafkaLag:null, kCalc:[] };
 }
 freshScene();
 
@@ -585,11 +586,17 @@ function drawScene(){
                    ctx.fillRect(bx+wDone, by, Math.max(2,wRun), bh); }
     ctx.font = '600 10px "IBM Plex Mono", monospace';
     ctx.fillStyle = C.ink2; ctx.textBaseline = 'middle';
-    ctx.fillText('lag ' + (S.kLag||0) + ' unclaimed', bx+wDone+wRun+8, by+bh/2);
+    ctx.fillText((S.kLag||0) + ' queued', bx+wDone+wRun+8, by+bh/2);
     ctx.textBaseline = 'top';
-    ctx.fillText('done ' + (S.kDone||0) + '   running ' + (S.kRun||0)
-                 + '   queued ' + (S.kLag||0) + '   of ' + tot,
-                 bx, by+bh+7);
+    /* `queued` is the CLI's column. Kafka lag is a DIFFERENT number: offsets commit
+       only as a contiguous completed prefix, so a finished message sitting behind an
+       unfinished one still counts as lag. Shown separately, never conflated. */
+    var lagTxt = 'done ' + (S.kDone||0) + '   running ' + (S.kRun||0)
+                 + '   queued ' + (S.kLag||0) + '   of ' + tot;
+    if (S.kKafkaLag !== null && S.kKafkaLag !== undefined) {
+      lagTxt += '      kafka lag ' + S.kKafkaLag;
+    }
+    ctx.fillText(lagTxt, bx, by+bh+7);
 
     /* the arithmetic, spelled out */
     ctx.font = '400 11px "IBM Plex Mono", monospace';
@@ -928,19 +935,22 @@ function batchSteps(){ return [
              '# consumerGroup MUST equal ER_CONSUMER_GROUP.',
              '# A mismatch is a silent no-scale: KEDA measures',
              '# a group nobody joins, sees lag 0, never scales.'],
-    payload:['$ kafka-consumer-groups.sh --describe \\',
-             '    --group kev1-eventrunner',
+    payload:['KEDA sums per-partition lag across the 12 partitions.',
              '',
-             'PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG',
-             '0          0               9               9',
-             '1          0               8               8',
-             '…          …               …               …',
-             '11         0               8               8',
-             '                                     TOTAL 100'],
+             '  100 requests submitted, none completed yet',
+             '  → nothing to commit, so every offset is behind',
+             '  → total lag = 100',
+             '',
+             '# Lag is not the CLI’s "queued" column. Offsets commit',
+             '# only as a CONTIGUOUS COMPLETED PREFIX per partition',
+             '# (eventrunner/offsets.py: committable), so a finished',
+             '# message sitting behind an unfinished one still counts.',
+             '# At 41 done / 16 running the CLI says queued 43 and',
+             '# Kafka lag is 59.'],
     dur:1050,
     setup:function(){ S.tab=1; },
     commit:function(){ S.tab=1; S.group=true; S.expected=100; S.lag=100; S.signedReq=true;
-      S.keda=true; S.kTotal=100; S.kDone=0; S.kRun=0; S.kLag=100;
+      S.keda=true; S.kTotal=100; S.kDone=0; S.kRun=0; S.kLag=100; S.kKafkaLag=100;
       S.kCalc=['lag 100  ≥  lagThreshold 1   → scale up',
                'desired = ceil(lag / lagThreshold) = ceil(100/1) = 100',
                'bounded by maxReplicaCount 10   → desired = 10'];
@@ -978,7 +988,7 @@ function batchSteps(){ return [
     setup:function(){ S.tab=1; },
     commit:function(){ S.tab=1; S.group=true; S.expected=100; S.lag=100; S.signedReq=true;
       S.replicas=3; S.runnerOn=true;
-      S.keda=true; S.kTotal=100; S.kDone=0; S.kRun=0; S.kLag=100;
+      S.keda=true; S.kTotal=100; S.kDone=0; S.kRun=0; S.kLag=100; S.kKafkaLag=100;
       S.kCalc=['desired = ceil(100 / 1) = 100',
                'min(desired 100, maxReplica 10, partitions 12) = 10',
                'KEDA 0 → 1, then HPA 1 → 10   ·   up to 40 turns'];
@@ -990,7 +1000,7 @@ function batchSteps(){ return [
   { title:'The whole cap arrives in one step, not over thirty seconds',
     wire:['HPA behavior.scaleUp: policies[0] = Pods 10 per 15s',
           '  stabilizationWindowSeconds: 0   selectPolicy: Max'],
-    body:'KEDA scales zero to one itself and delegates one to N to an HPA. The Kubernetes default adds at most four pods or one hundred per cent per fifteen seconds, so a burst would climb one, five, ten over about thirty seconds. A batch that finishes in a minute would be half over before its capacity existed.',
+    body:'KEDA scales zero to one itself and delegates one to N to an HPA. The Kubernetes default adds at most four pods or one hundred per cent per fifteen seconds. So a burst would climb one, five, ten over about thirty seconds. A batch that finishes in a minute would be half over before its capacity existed.',
     chips:['default: 1→5→10 over ~30s','explicit: 0→10 at t=6s','selectPolicy: Max'],
     topic:'control plane — the policy that makes it fast',
     headers:['advanced.horizontalPodAutoscalerConfig.behavior:',
@@ -1017,7 +1027,7 @@ function batchSteps(){ return [
     setup:function(){ S.tab=1; },
     commit:function(){ S.tab=1; S.group=true; S.expected=100; S.lag=100; S.signedReq=true;
       S.replicas=3; S.runnerOn=true;
-      S.keda=true; S.kTotal=100; S.kDone=0; S.kRun=1; S.kLag=99;
+      S.keda=true; S.kTotal=100; S.kDone=0; S.kRun=1; S.kLag=99; S.kKafkaLag=100;
       S.kCalc=['watcher run: replicas 10 Ready at t=6s',
                'watcher run: t=12s  replicas=10  running=1',
                'no thundering herd: the ceiling is already bounded'];
@@ -1030,7 +1040,7 @@ function batchSteps(){ return [
     wire:['EventRunner ×10: consume → verify → spawn agent → publish result',
           'Kafka: offsets commit per member, after each terminal event'],
     body:'Each pod owns whole partitions and runs up to four turns at once. The lag falls only as terminal events land, so the number KEDA reads is always the work still outstanding.',
-    chips:['4/100 → 41/100 → 88/100','lag 96 → 43 → 7','10 pods throughout'],
+    chips:['4/100 → 41/100 → 88/100','queued 92 → 43 → 7','kafka lag 96 → 59 → 12','10 pods throughout'],
     topic:'the group status endpoint, polled by the CLI',
     headers:['GET /v0/groups/bold-hornet-2962/status',
              '',
@@ -1051,10 +1061,11 @@ function batchSteps(){ return [
     setup:function(){ S.tab=1; },
     commit:function(){ S.tab=1; S.group=true; S.expected=100; S.signedReq=true;
       S.replicas=3; S.runnerOn=true; S.lag=43; S.done=41; S.signedTerm=true; S.stored=41;
-      S.keda=true; S.kTotal=100; S.kDone=41; S.kRun=16; S.kLag=43;
-      S.kCalc=['lag 43  ≥  lagThreshold 1   → hold at 10',
-               'a pod mid-run cannot be scaled away: its offset',
-               '  is uncommitted, so its work still counts as lag'];
+      S.keda=true; S.kTotal=100; S.kDone=41; S.kRun=16; S.kLag=43; S.kKafkaLag=59;
+      S.kCalc=['queued 43 is the CLI column; kafka lag is 59',
+               'offsets commit as a contiguous prefix, so the 16',
+               '  in flight — and anything finished behind them —',
+               '  still count as lag. 59 ≥ threshold 1 → hold at 10'];
       S.note='41/100 done · 16 running · 43 queued · 45s elapsed'; },
     overlay:function(t){
       chipAt.apply(null, along(P.r2n, ease(seg(t,0,.4))).concat(['consume', C.blue]));
@@ -1090,7 +1101,7 @@ function batchSteps(){ return [
     setup:function(){ S.tab=1; },
     commit:function(){ S.tab=1; S.group=true; S.expected=100; S.done=100;
       S.lag=0; S.replicas=0; S.runnerOn=false; S.signedTerm=true; S.stored=100;
-      S.keda=true; S.kTotal=100; S.kDone=100; S.kRun=0; S.kLag=0;
+      S.keda=true; S.kTotal=100; S.kDone=100; S.kRun=0; S.kLag=0; S.kKafkaLag=0;
       S.kCalc=['lag 0   → deactivate   → replicas 10 → 0',
                'no elapsed time here: the drain and the total are',
                '  measured in different runs (see the payload)'];
@@ -1125,7 +1136,7 @@ function batchSteps(){ return [
     setup:function(){ S.tab=1; },
     commit:function(){ S.tab=1; S.group=true; S.expected=100; S.done=100;
       S.lag=0; S.replicas=0; S.runnerOn=false; S.signedTerm=true; S.stored=100; S.bound=true;
-      S.keda=true; S.kTotal=100; S.kDone=100; S.kRun=0; S.kLag=0;
+      S.keda=true; S.kTotal=100; S.kDone=100; S.kRun=0; S.kLag=0; S.kKafkaLag=0;
       S.kCalc=['100 members counted against expected 100 → reason "all"',
                '2 notifications sent, whatever the batch size',
                'slowest member 79.6 s   ·   total 1m20s'];
