@@ -421,20 +421,21 @@ Phases 3 and 4 add controls of exactly the same shape, so the five questions nee
 to be a gate on new work rather than a retrospective on old work.
 
 **The cluster run sharpened that, and widened it.** Seven more bugs, none reachable by the
-test suite or by reading code. All seven were about the deployment rather than the logic —
-an image without the signing code in it, a keyset written but never read by the running
-process.
+test suite or by reading code. All seven were about the deployment rather than the logic.
+Two examples: an image without the signing code in it, and a keyset written but never read
+by the running process.
 
 The documentation was not the weak link this time. **The tooling was.** It reported green
 throughout, while the system refused all traffic. So the gate needs the sixth question in §3
 as well: *is the thing you checked the thing that is running?*
 
-All seven are fixed. The last was [#12](https://github.com/rossoctl/eventing-lab/issues/12),
-a service that started happily while enforcing against zero approved keys;
-`keyset.refusal_if_enforcing_empty` now refuses that at startup in both services
-(`shared/keyset.py:147`, called from `eventrunner/__main__.py:80` and
-`eventbridge/__main__.py:75`). The
-missing *checks* are filed separately —
+All seven are fixed. The last was
+[#12](https://github.com/rossoctl/eventing-lab/issues/12): a service that started happily
+while enforcing against zero approved keys. `keyset.refusal_if_enforcing_empty` now
+refuses that at startup in both services (`shared/keyset.py:147`, called from
+`eventrunner/__main__.py:80` and `eventbridge/__main__.py:75`).
+
+The missing *checks* are filed separately —
 [#10](https://github.com/rossoctl/eventing-lab/issues/10) (assert the image
 contains the code being enforced, not merely that it pulls) and
 [#11](https://github.com/rossoctl/eventing-lab/issues/11) (a selftest that

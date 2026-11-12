@@ -246,9 +246,16 @@
       </p>
       <p class="text-[12.5px] sub mt-3">
         <strong style="color:var(--ink)">Why 10 and not 100.</strong> The lag asks for one
-        pod per pending request — <span class="mono">ceil(100 / lagThreshold 1) = 100</span>
-        — and two ceilings cut it down:
-        <span class="mono">min(100, maxReplicaCount 10, partitions 12) = 10</span>.
+        pod per pending request: <span class="mono">lag / lagThreshold 1 = 100</span>. Two
+        clamps cut it down, <strong style="color:var(--ink)">in this order</strong> — the
+        Kafka scaler caps the metric at the
+        <span class="mono">12</span> partitions first, because
+        <span class="mono">allowIdleConsumers</span> is false, so
+        <span class="mono">kubectl get hpa</span> shows <span class="mono">12/1</span> and
+        not <span class="mono">100/1</span>. The HPA then applies
+        <span class="mono">maxReplicaCount 10</span>.
+      </p>
+      <p class="text-[12.5px] sub mt-2">
         Kafka gives each partition to exactly one consumer in a group, so pods beyond
         twelve would sit idle. Raising the cap past 12 means adding partitions first. The
         two numbers are one decision.
@@ -945,28 +952,31 @@ function batchSteps(){ return [
              '# only as a CONTIGUOUS COMPLETED PREFIX per partition',
              '# (eventrunner/offsets.py: committable), so a finished',
              '# message sitting behind an unfinished one still counts.',
-             '# At 41 done / 16 running the CLI says queued 43 and',
-             '# Kafka lag is 59.'],
+             '# At 41 done / 16 running the CLI says queued 43,',
+             '# while Kafka lag is ≥ 59 — higher whenever a',
+             '# completion lands out of order, which with 100',
+             '# agents of differing length it always does.'],
     dur:1050,
     setup:function(){ S.tab=1; },
     commit:function(){ S.tab=1; S.group=true; S.expected=100; S.lag=100; S.signedReq=true;
       S.keda=true; S.kTotal=100; S.kDone=0; S.kRun=0; S.kLag=100; S.kKafkaLag=100;
       S.kCalc=['lag 100  ≥  lagThreshold 1   → scale up',
-               'desired = ceil(lag / lagThreshold) = ceil(100/1) = 100',
-               'bounded by maxReplicaCount 10   → desired = 10'];
+               'lag / lagThreshold = 100, clamped to partitions 12',
+               'then clamped by the HPA to maxReplicaCount 10'];
       S.note='Lag means unfinished work. That is what makes it a usable queue gauge.'; },
     overlay:function(t){
       chipAt.apply(null, along(P.keda2req, ease(seg(t,0,.8))).concat(['describe', C.amber]));
     }
   },
-  { title:'KEDA wants 100 pods. The cap gives it 10',
-    wire:['KEDA: desired = ceil(lag / lagThreshold) = 100',
-          'KEDA → HPA: clamp to maxReplicaCount = 10',
+  { title:'Two clamps, in order: partitions, then the cap',
+    wire:['KEDA scaler: lag / lagThreshold → clamp to 12 partitions',
+          'KEDA → HPA: metric 12/1   (not 100/1)',
+          'HPA: clamp to maxReplicaCount = 10',
           'KEDA → Deployment/eventrunner: 0 → 1   (activation)',
           'HPA  → Deployment/eventrunner: 1 → 10'],
-    body:'The naive answer is one pod per pending request. Two ceilings cut it to ten. The cap is set to ten, and the topic has twelve partitions. Kafka gives each partition to exactly one consumer in a group, so pods beyond twelve would sit idle.',
-    chips:['desired 100 → 10','maxReplicaCount: 10','12 partitions = hard ceiling'],
-    topic:'control plane — the clamp',
+    body:'The naive answer is one pod per pending request. Two clamps cut it down, and the order matters. The Kafka scaler caps the metric at the partition count first, because allowIdleConsumers is false. The HPA then applies maxReplicaCount.',
+    chips:['scaler clamps to 12','HPA clamps to 10','allowIdleConsumers: false'],
+    topic:'control plane — the two clamps',
     headers:['minReplicaCount: 0',
              ['maxReplicaCount: 10        # under the topic’s 12 partitions', 'hl'],
              '',
@@ -976,11 +986,16 @@ function batchSteps(){ return [
              '# over 10 consumers means two own two each.'],
     payload:['why ten and not a hundred:',
              '',
-             '  ceil(100 / 1)           = 100   ← what the lag asks for',
-             '  maxReplicaCount         =  10   ← the configured cap',
-             '  kev1-requests partitions=  12   ← Kafka’s hard ceiling',
+             '  lag / lagThreshold      = 100   ← what the lag asks for',
+             '  kev1-requests partitions=  12   ← the SCALER clamps here',
+             '  maxReplicaCount         =  10   ← then the HPA clamps',
              '',
-             'effective = min(100, 10, 12) = 10',
+             '`kubectl get hpa` therefore shows 12/1, not 100/1.',
+             '',
+             '# allowIdleConsumers defaults to false, so KEDA will',
+             '# not ask for more consumers than there are',
+             '# partitions. The 10 is the HPA’s doing, not the',
+             '# scaler’s. Both land on the same answer here.',
              '',
              '# concurrency is 10 pods × ER_MAX_CONCURRENT 4',
              '# = up to 40 turns at once, not 10.'],
@@ -989,8 +1004,9 @@ function batchSteps(){ return [
     commit:function(){ S.tab=1; S.group=true; S.expected=100; S.lag=100; S.signedReq=true;
       S.replicas=3; S.runnerOn=true;
       S.keda=true; S.kTotal=100; S.kDone=0; S.kRun=0; S.kLag=100; S.kKafkaLag=100;
-      S.kCalc=['desired = ceil(100 / 1) = 100',
-               'min(desired 100, maxReplica 10, partitions 12) = 10',
+      S.kCalc=['lag / lagThreshold = 100',
+               'scaler clamps to partitions 12   → metric 12/1',
+               'HPA clamps to maxReplicaCount 10 → 10 pods',
                'KEDA 0 → 1, then HPA 1 → 10   ·   up to 40 turns'];
       S.note='A pod per request is not the goal. A partition per pod is the limit.'; },
     overlay:function(t){
@@ -1038,9 +1054,9 @@ function batchSteps(){ return [
   },
   { title:'The queue drains, and the lag tracks unfinished work',
     wire:['EventRunner ×10: consume → verify → spawn agent → publish result',
-          'Kafka: offsets commit per member, after each terminal event'],
+          'Kafka: offsets commit as a contiguous completed prefix per partition'],
     body:'Each pod owns whole partitions and runs up to four turns at once. The lag falls only as terminal events land, so the number KEDA reads is always the work still outstanding.',
-    chips:['4/100 → 41/100 → 88/100','queued 92 → 43 → 7','kafka lag 96 → 59 → 12','10 pods throughout'],
+    chips:['4/100 → 41/100 → 88/100','queued 92 → 43 → 7','kafka lag ≥ 96 → ≥ 59 → ≥ 12','10 pods (watcher run)'],
     topic:'the group status endpoint, polled by the CLI',
     headers:['GET /v0/groups/bold-hornet-2962/status',
              '',
@@ -1061,11 +1077,13 @@ function batchSteps(){ return [
     setup:function(){ S.tab=1; },
     commit:function(){ S.tab=1; S.group=true; S.expected=100; S.signedReq=true;
       S.replicas=3; S.runnerOn=true; S.lag=43; S.done=41; S.signedTerm=true; S.stored=41;
-      S.keda=true; S.kTotal=100; S.kDone=41; S.kRun=16; S.kLag=43; S.kKafkaLag=59;
-      S.kCalc=['queued 43 is the CLI column; kafka lag is 59',
-               'offsets commit as a contiguous prefix, so the 16',
-               '  in flight — and anything finished behind them —',
-               '  still count as lag. 59 ≥ threshold 1 → hold at 10'];
+      S.keda=true; S.kTotal=100; S.kDone=41; S.kRun=16; S.kLag=43; S.kKafkaLag=null;
+      S.kCalc=['queued 43 is the CLI column. Kafka lag is higher',
+               '  and was not captured: ≥ 59, and 77–99 in a probe',
+               '  over random completion orders.',
+               'Offsets commit as a contiguous prefix, so the 16 in',
+               '  flight — and anything done behind them — still',
+               '  count. Any of those ≥ threshold 1 → stay at the cap.'];
       S.note='41/100 done · 16 running · 43 queued · 45s elapsed'; },
     overlay:function(t){
       chipAt.apply(null, along(P.r2n, ease(seg(t,0,.4))).concat(['consume', C.blue]));
@@ -1082,10 +1100,12 @@ function batchSteps(){ return [
              'KEDA scales N → 0 directly, not through the HPA',
              '',
              '# so scaleDown.stabilizationWindowSeconds (30) applies',
-             '# to 10 → 5 → 1, and NOT to the final drop to zero.',
+             '# to any step-down from 10 that stays above zero, and',
+             '# NOT to the final drop to zero.',
              '',
              '# cooldownPeriod is 300 in k8s/base and patched to 5 by',
-             '# the kind and test overlays — the 22 s figure is theirs.'],
+             '# the kind and test overlays. The 22 s figure is theirs:',
+             '# reports/phase1-report.md §30.'],
     payload:['at rest:',
              '  lag 0   ·   replicas 0   ·   cost 0',
              '',
@@ -1105,7 +1125,7 @@ function batchSteps(){ return [
       S.kCalc=['lag 0   → deactivate   → replicas 10 → 0',
                'no elapsed time here: the drain and the total are',
                '  measured in different runs (see the payload)'];
-      S.note='Idle costs nothing. The next batch wakes it again in about two seconds.'; },
+      S.note='Idle costs nothing. KEDA reacts in about two seconds; a pod is Ready in about fourteen.'; },
     overlay:function(t){
       chipAt.apply(null, along(P.keda2n, 1-ease(seg(t,0,.8))).concat(['scale 10→0', C.amber]));
     }
