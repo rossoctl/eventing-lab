@@ -16,6 +16,7 @@ document goes.
 | **See it work**, step by step                        | [`demos/`](demos/) — performed walkthroughs          |
 | Look up a term                                       | [`glossary.md`](glossary.md)                         |
 | Find an investigation note, runbook or dead end      | [`notes/`](notes/)                                   |
+| **Write** one of these, at the sentence level        | [`STYLE.md`](STYLE.md) — length, vocabulary, one action per step |
 | Install or run it                                    | [root README](../README.md)                          |
 
 Implementation plans live in [`plans/`](plans/) and are **local-only** — gitignored by

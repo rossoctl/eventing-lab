@@ -244,14 +244,14 @@
         pod per pending request — <span class="mono">ceil(100 / lagThreshold 1) = 100</span>
         — and two ceilings cut it down:
         <span class="mono">min(100, maxReplicaCount 10, partitions 12) = 10</span>.
-        Kafka gives each partition to exactly one consumer in a group, so an eleventh pod
-        would sit idle. Raising the cap past 12 means adding partitions first; the two
-        numbers are one decision.
+        Kafka gives each partition to exactly one consumer in a group, so pods beyond
+        twelve would sit idle. Raising the cap past 12 means adding partitions first. The
+        two numbers are one decision.
       </p>
       <p class="text-[12.5px] sub mt-2">
         <strong style="color:var(--ink)">10 pods is not 10 agents.</strong> Each pod runs up
-        to <span class="mono">ER_MAX_CONCURRENT = 4</span> turns at once, so the batch peaks
-        near 40 concurrent agents — which is why the CLI reports 16 running against 10
+        to <span class="mono">ER_MAX_CONCURRENT = 4</span> turns at once, so the batch can
+        run up to 40 agents at once. That is why the CLI reports 16 running against 10
         replicas.
       </p>
       <p class="text-[12.5px] sub mt-2">
@@ -947,8 +947,9 @@ function batchSteps(){ return [
   { title:'KEDA wants 100 pods. The cap gives it 10',
     wire:['KEDA: desired = ceil(lag / lagThreshold) = 100',
           'KEDA → HPA: clamp to maxReplicaCount = 10',
-          'HPA → Deployment/eventrunner: replicas 0 → 10'],
-    body:'The naive answer is one pod per pending request. Two ceilings cut it to ten. The cap is set to ten, and the topic has twelve partitions — Kafka gives each partition to exactly one consumer in a group, so an eleventh pod would sit idle.',
+          'KEDA → Deployment/eventrunner: 0 → 1   (activation)',
+          'HPA  → Deployment/eventrunner: 1 → 10'],
+    body:'The naive answer is one pod per pending request. Two ceilings cut it to ten. The cap is set to ten, and the topic has twelve partitions. Kafka gives each partition to exactly one consumer in a group, so pods beyond twelve would sit idle.',
     chips:['desired 100 → 10','maxReplicaCount: 10','12 partitions = hard ceiling'],
     topic:'control plane — the clamp',
     headers:['minReplicaCount: 0',
@@ -1000,10 +1001,13 @@ function batchSteps(){ return [
              '  t=15s  5 pods     max(100%, 4 pods) per 15s',
              '  t=30s  10 pods    ← cap reached, batch half done',
              '',
-             'with it, measured:',
+             'with it — WATCHER RUN (agent-groups-demo §Part 2):',
              '  t=6s   replicas=10          ← cap in one step',
              '  t=12s  replicas=10 running=1',
-             '  t=30s  replicas=10 running=8'],
+             '  t=30s  replicas=10 running=8',
+             '',
+             '# a different run from the CLI transcript in the next',
+             '# step. Replica counts here, elapsed totals there.'],
     dur:1150,
     setup:function(){ S.tab=1; },
     commit:function(){ S.tab=1; S.group=true; S.expected=100; S.lag=100; S.signedReq=true;
@@ -1027,13 +1031,17 @@ function batchSteps(){ return [
              '',
              '# the CLI prints one line per poll. Each line is',
              '# done + running + queued = 100, always.'],
-    payload:['  4/100 done ·  4 running · 92 queued ·   24s',
+    payload:['CLI RUN (agent-groups-demo §Part 2 transcript):',
+             '',
+             '  4/100 done ·  4 running · 92 queued ·   24s',
              ' 41/100 done · 16 running · 43 queued ·   45s',
              ' 88/100 done ·  5 running ·  7 queued · 1m00s',
              '100/100 done ·                         1m20s',
              '',
              '# "running" exceeds 10 because each pod runs up to',
-             '# ER_MAX_CONCURRENT = 4 turns in parallel.'],
+             '# ER_MAX_CONCURRENT = 4 turns in parallel.',
+             '# Elapsed times are this run only — the replica trace',
+             '# in the previous step is a different run.'],
     dur:1300,
     setup:function(){ S.tab=1; },
     commit:function(){ S.tab=1; S.group=true; S.expected=100; S.signedReq=true;
@@ -1062,13 +1070,17 @@ function batchSteps(){ return [
              '',
              '# cooldownPeriod is 300 in k8s/base and patched to 5 by',
              '# the kind and test overlays — the 22 s figure is theirs.'],
-    payload:['t=33s   replicas=0     # the batch drained',
-             '',
-             'at rest:',
+    payload:['at rest:',
              '  lag 0   ·   replicas 0   ·   cost 0',
              '',
              '# EventBridge stays at 1 replica. It is the front',
-             '# door, and it is not what scales.'],
+             '# door, and it is not what scales.',
+             '',
+             '# No elapsed time is quoted here on purpose. The',
+             '# replica trace in step 5 and the CLI transcript in',
+             '# step 6 are DIFFERENT RUNS, so pairing a drain time',
+             '# from one with a total from the other would invent',
+             '# a timeline. The CLI run is the one timed below.'],
     dur:1100,
     setup:function(){ S.tab=1; },
     commit:function(){ S.tab=1; S.group=true; S.expected=100; S.done=100;

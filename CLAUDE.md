@@ -75,6 +75,12 @@ version:
 
 ### Writing style for docs
 
+**Sentence-level rules live in [`docs/STYLE.md`](docs/STYLE.md)** — sentence length, one
+word per concept, one action per step, and the vocabulary table. The rules below are about
+_what_ a document must contain; STYLE.md is about _how_ the sentences read. Read both
+before writing a doc, and put a new rule in whichever file it belongs to rather than
+starting a third list.
+
 - **Be specific and falsifiable.** "Reduced latency" is worthless; "p99 fell from 840 ms to
   210 ms on the 3-node rig, 20 runs" can be checked.
 - **State limits plainly.** Every spec gets a "What this does not do"; every report gets a

@@ -10,6 +10,12 @@ fact and not the flourish.
 **This is about sentences, not about voice.** The rules below shorten and disambiguate.
 They do not ask you to write blandly, and rule 6 exists to say so.
 
+**Where this sits.** [`../CLAUDE.md`](../CLAUDE.md) § "Writing style for docs" governs
+*what* a document must contain — be falsifiable, state the limits, write the correction as
+the new fact. This file governs *how* the sentences read. Put a new rule in whichever file
+it belongs to, rather than starting a third list. [`README.md`](README.md) decides which
+*kind* of document you are writing in the first place.
+
 ---
 
 ## 1. One sentence, one fact
@@ -107,10 +113,11 @@ it — the sentence after it is the note).
 **This rule outranks brevity.** The most valuable sentences in these documents are the
 ones that say what something does *not* do:
 
-> "What it does not do is attest anything. The set records which keys an operator
-> approved, not which workloads a platform vouched for." — `shared/keyset.py`
+> "What the set does not do at all is attest anything. It records which keys an operator
+> approved, not which workloads a platform vouched for." — `shared/keyset.py:33`
 >
 > "This proves who finished a run, not what it said along the way."
+> — `docs/notes/kubecon-na-2026.md:812`, quoting spec 0003 §4.4 step 2
 
 Do not shorten a limitation into a claim. If a rewrite makes a control sound stronger than
 the code makes it, the rewrite is wrong. The same goes for the dry asides — "a cycle here
