@@ -13,7 +13,7 @@ def _kind(tmp_path, recreate=False):
 
 
 def test_check_reports_missing_kubeconfig(tmp_path, capsys):
-    kind, _ = _kind(tmp_path)
+    kind, kubeconfig = _kind(tmp_path)
     kind.exists = lambda: True
     kind.clusters = lambda: ["kev1"]
     kind.k.items = mock.Mock(side_effect=AssertionError("kubectl must not be called"))
@@ -23,6 +23,18 @@ def test_check_reports_missing_kubeconfig(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "FAIL the kubeconfig" in out
     assert "kind export kubeconfig --name kev1" in out
+    assert not kubeconfig.exists()
+
+
+def test_install_path_leaves_an_existing_kubeconfig_alone(tmp_path, monkeypatch):
+    kind, kubeconfig = _kind(tmp_path)
+    kind.clusters = lambda: ["kev1"]
+    kubeconfig.write_text("apiVersion: v1\n")
+    monkeypatch.setattr(kind_setup, "run",
+                        mock.Mock(side_effect=AssertionError("run must not be called")))
+
+    assert kind.create() is True
+    assert kubeconfig.read_text() == "apiVersion: v1\n"
 
 
 def test_install_path_exports_kubeconfig_for_existing_cluster(tmp_path, monkeypatch):
