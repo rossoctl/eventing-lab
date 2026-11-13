@@ -104,6 +104,10 @@ class Kind:
         if self.exists():
             if not self.args.recreate:
                 self.c.log(f"cluster {self.name!r} already exists")
+                if not pathlib.Path(self.kubeconfig).is_file():
+                    res = run(["kind", "export", "kubeconfig", "--name", self.name,
+                               "--kubeconfig", self.kubeconfig], timeout=60)
+                    return self.c.expect_run(res, f"exported the kubeconfig for {self.name!r}")
                 return True
             self.c.log(f"--recreate: deleting cluster {self.name!r}")
             self.c.expect_run(run(["kind", "delete", "cluster", "--name", self.name],
@@ -275,6 +279,12 @@ class Kind:
         self.c.expect(self.exists(), f"a Kind cluster named {self.name!r} exists",
                       f"clusters: {self.clusters() or 'none'}")
         if not self.exists():
+            return
+        if not self.c.expect(pathlib.Path(self.kubeconfig).is_file(),
+                             f"the kubeconfig {self.kubeconfig} exists",
+                             "the cluster exists but its kubeconfig has not been exported. Run:\n"
+                             f"  kind export kubeconfig --name {self.name} "
+                             f"--kubeconfig {self.kubeconfig}"):
             return
         self.check_resources()
         self.c.section("what Phase 1 needs")
