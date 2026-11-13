@@ -280,11 +280,11 @@ class Kind:
                       f"clusters: {self.clusters() or 'none'}")
         if not self.exists():
             return
-        if not pathlib.Path(self.kubeconfig).is_file():
-            self.c.fail(f"the kubeconfig {self.kubeconfig} exists",
-                        "the cluster exists but its kubeconfig has not been exported. Run:\n"
-                        f"  kind export kubeconfig --name {self.name} "
-                        f"--kubeconfig {self.kubeconfig}")
+        if not self.c.expect(pathlib.Path(self.kubeconfig).is_file(),
+                             f"the kubeconfig {self.kubeconfig} exists",
+                             "the cluster exists but its kubeconfig has not been exported. Run:\n"
+                             f"  kind export kubeconfig --name {self.name} "
+                             f"--kubeconfig {self.kubeconfig}"):
             return
         self.check_resources()
         self.c.section("what Phase 1 needs")
