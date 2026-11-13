@@ -1,3 +1,10 @@
+"""kind_setup.py's kubeconfig guard — a missing file is a reported gap, not a traceback.
+
+Regression tests for #25: `--check` on a cluster that exists but whose kubeconfig was
+never exported used to pass its first check and then die inside `check_resources()`
+with `RuntimeError: kubectl get nodes failed`. `--check` must report it and touch
+nothing; the install path must leave an existing kubeconfig alone.
+"""
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
