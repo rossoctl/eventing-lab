@@ -346,11 +346,11 @@ python3 scripts/k8s_demo_flow.py --kubeconfig .kube/config-kind \
   --skip-cold-continue --skip-idle-replay
 ```
 
-**Start the log capture BEFORE the flow.** This beat's only evidence is a log line, and the
-flow ends on `stage3()` — scale-back-to-zero — with a 5 s cooldown. Run the grep afterwards
-and `logs deploy/eventrunner` resolves through a Deployment with no pods and returns nothing
-(or `error: timed out waiting for the condition`). The run-of-show's checklist says this; it
-is easy to drop when transcribing commands.
+**Start the log capture BEFORE the flow.** The refusal line exists only while the runner
+pod is briefly up. After `stage3()` scales the Deployment back to zero (5 s cooldown),
+a retrospective `kubectl logs deploy/eventrunner` cannot retrieve that line; it returns
+nothing or `error: timed out waiting for the condition`. Keep the live capture running
+through the beat, then inspect the saved `/tmp/refusals.log`.
 
 ```sh
 # pane E, started FIRST and left running for the whole beat

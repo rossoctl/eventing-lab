@@ -16,6 +16,7 @@ from __future__ import annotations
 import binascii
 import json
 import sys
+from types import SimpleNamespace
 
 import k8s_demo_flow as flow
 import pytest
@@ -317,6 +318,47 @@ def test_the_signature_binds_the_PROMPT_not_just_the_envelope():
     ok, why = S.verify_request(tampered, _RequireCfg(), ks)
     assert not ok, "a swapped payload under a genuine signature must be refused"
     assert "does not verify" in why
+
+
+@pytest.mark.parametrize(
+    ("ok", "out", "err"),
+    [
+        (True, "", "FORGED REQUEST sentinel was not captured"),
+        (False, "", "kubectl could not capture pod output"),
+    ],
+)
+def test_forged_request_publish_output_does_not_gate_outcome_checks(ok, out, err):
+    """kubectl output is diagnostic; the correlation-based outcome checks must run
+    even when the pod's sentinel is missing or kubectl reports a command failure."""
+    class _Kubectl:
+        def get(self, *_args, **_kwargs):
+            return {"data": {"KAFKA_BOOTSTRAP": "broker:9092",
+                             "REQUEST_TOPIC": "kev1-requests"}}
+
+        def call(self, *_args, **_kwargs):
+            return SimpleNamespace(ok=ok, out=out, err=err)
+
+    class _Checks:
+        def __init__(self):
+            self.messages = []
+
+        def log(self, message):
+            self.messages.append(message)
+
+        def expect(self, *_args, **_kwargs):
+            raise AssertionError("pod output must not create a publish expectation")
+
+    stage = flow.Flow.__new__(flow.Flow)
+    stage.k = _Kubectl()
+    stage.c = _Checks()
+    stage.ns = "kev1"
+    stage.args = SimpleNamespace(registry="registry", tag="local1")
+
+    assert stage._publish_forged_request("forged-regression") is None
+    assert any("FORGED REQUEST sentinel was not captured" in line
+               or "kubectl could not capture pod output" in line
+               for line in stage.c.messages)
+    assert any("reported failure" in line for line in stage.c.messages) is (not ok)
 
 
 class _RequireCfg:

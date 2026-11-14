@@ -1037,8 +1037,7 @@ class Flow:
         # A correlation id that EventBridge never minted. Nothing upstream knows it, so
         # a transcript existing for it later could only mean the forged event ran.
         corr = f"forged-{int(time.time())}"
-        if not self._publish_forged_request(corr):
-            return
+        self._publish_forged_request(corr)
         # The pod has to wake before it can refuse, so wait for the refusal rather than
         # sleeping a fixed interval: the wake is 1-5s and the poll adds more.
         # Match on THIS forgery's correlation id, and read the whole log rather than
@@ -1098,12 +1097,16 @@ class Flow:
                       "the runner returned to 0 — the offset was committed, so a "
                       "refused request does not pin a pod or replay forever")
 
-    def _publish_forged_request(self, corr: str) -> bool:
+    def _publish_forged_request(self, corr: str) -> None:
         """Publish one unsigned request from a throwaway in-cluster pod.
 
         Same rationale as `_publish_forgery`: the eventrunner image already carries
         `shared/` and `kafka-python`, so the event is encoded by the production codec,
         and publishing from inside the cluster is the attacker position §3.3 describes.
+
+        Pod output is diagnostic only. The stage verifies the refusal and absence of
+        execution by correlation id, so a missing kubectl stdout sentinel must not
+        prevent those outcome checks from running.
         """
         cfg = self.k.get("configmap", "eventing-config", namespace=self.ns) or {}
         bootstrap = dig(cfg, "data", "KAFKA_BOOTSTRAP") or \
@@ -1120,11 +1123,8 @@ class Flow:
              "--command", "--", "python", "-c", forge],
             namespace=self.ns, timeout=240)
         out = ((res.out or "") + (res.err or "")).strip()
-        ok = res.ok and "FORGED REQUEST" in out
-        self.c.expect(ok, "a throwaway pod published 1 unsigned request onto the "
-                          "requests topic (in-cluster, production codec)",
-                      out[-500:])
-        return ok
+        status = "succeeded" if res.ok else "reported failure"
+        self.c.log(f"  throwaway pod {status}; output: {out[-500:] or '(no output captured)'}")
 
     def _group_status(self, gid: str) -> dict | None:
         try:
